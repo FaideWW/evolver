@@ -1,47 +1,69 @@
-import { Show, createSignal } from "solid-js";
+import { Show, batch, createSignal } from "solid-js";
 import "./App.css";
 import { createStore, produce } from "solid-js/store";
 
 const BASE_VALUES = {
   bitFlipCooldownMS: 1000,
   bitsPerFlip: 1,
-  maxBits: 0,
   bitsDecayRatePerSecondPerBitExceeded: 0.1,
-};
-
-const ANIMATION_TIMERS = {
-  bitFlipGlow: 1,
-  bitDecayGlow: 1,
+  memoryPerFlipFlop: 2,
+  flipFlopCost: 4,
+  clockTickSpeedMS: 10000,
+  clockBitsPerTick: 1,
+  clockCost: 8,
+  clockCostMultiplierPerClock: 1.2,
 };
 
 const [state, setState] = createStore({
   bits: {
     count: 0,
+    flipped: 0,
     mods: {
-      cdr: 1,
+      cooldownMulti: 1,
       addedBitsPerFlip: 0,
       bitsPerFlipMulti: 1,
       decayMulti: 1,
-      addedMaxBits: 0,
-      maxBitsMulti: 1,
     },
     timers: {
       lastFlipped: new Date(0),
       lastDecay: new Date(0),
     },
   },
+  flipFlops: {
+    count: 0,
+    purchased: 0,
+    mods: {
+      memoryMulti: 1,
+    },
+  },
+  clocks: {
+    count: 0,
+    purchased: 0,
+    mods: {
+      tickSpeedMulti: 1,
+      bitsPerTickMulti: 1,
+    },
+    timers: {
+      lastTick: new Date(0),
+    },
+  },
   progress: {
+    clocksUnlocked: false,
     flipflopUnlocked: false,
+    bitDecayUnlocked: false,
   },
 });
 
 const bits = () => state.bits.count;
 
 const bitFlipCooldown = () =>
-  BASE_VALUES.bitFlipCooldownMS * state.bits.mods.cdr;
+  BASE_VALUES.bitFlipCooldownMS * state.bits.mods.cooldownMulti;
 const maxBits = () =>
-  (BASE_VALUES.maxBits + state.bits.mods.addedMaxBits) *
-  state.bits.mods.maxBitsMulti;
+  state.flipFlops.count *
+  (BASE_VALUES.memoryPerFlipFlop * state.flipFlops.mods.memoryMulti);
+
+const clockCost = () => BASE_VALUES.clockCost;
+const flipFlopCost = () => BASE_VALUES.flipFlopCost;
 
 const decayBits = (time: Date) => {
   const exceededBy = bits() - maxBits();
@@ -80,10 +102,53 @@ const flipBit = () =>
         draft.bits.timers.lastDecay = now;
       }
       draft.bits.count = nextBits;
+      draft.bits.flipped += addedBits;
       console.log(`flipping bit. new bits: ${draft.bits.count}`);
 
-      if (!draft.progress.flipflopUnlocked) {
-        draft.progress.flipflopUnlocked = true;
+      if (!draft.progress.clocksUnlocked && draft.bits.count >= clockCost()) {
+        draft.progress.clocksUnlocked = true;
+      }
+    })
+  );
+
+const buyFlipFlop = () =>
+  setState(
+    produce((draft) => {
+      if (draft.bits.count >= flipFlopCost()) {
+        draft.flipFlops.count++;
+        draft.bits.count -= flipFlopCost();
+      }
+    })
+  );
+
+const clockTickTime = () =>
+  BASE_VALUES.clockTickSpeedMS * state.clocks.mods.tickSpeedMulti;
+
+const clockBitsPerTick = () =>
+  BASE_VALUES.clockBitsPerTick * state.clocks.mods.bitsPerTickMulti;
+
+const tickClocks = (time: Date) =>
+  setState(
+    produce((draft) => {
+      if (draft.clocks.count > 0) {
+        const timeSinceLastTick =
+          time.getTime() - draft.clocks.timers.lastTick.getTime();
+        if (clockTickTime() < timeSinceLastTick) {
+          const addedBits = draft.clocks.count * clockBitsPerTick();
+          draft.bits.count += addedBits;
+          draft.clocks.timers.lastTick = time;
+        }
+      }
+    })
+  );
+
+const buyClock = () =>
+  setState(
+    produce((draft) => {
+      if (draft.bits.count >= clockCost()) {
+        draft.clocks.count++;
+        draft.clocks.purchased++;
+        draft.bits.count -= clockCost();
       }
     })
   );
@@ -94,7 +159,12 @@ function App() {
   const step = () => {
     const nextNow = new Date();
     setNow(nextNow);
-    decayBits(nextNow);
+    if (state.progress.bitDecayUnlocked) {
+      decayBits(nextNow);
+    }
+    if (state.progress.clocksUnlocked) {
+      tickClocks(nextNow);
+    }
     window.requestAnimationFrame(step);
   };
 
@@ -106,6 +176,9 @@ function App() {
       bitFlipCooldown(),
       1
     );
+
+  const automaticBitsPerSecond = () =>
+    (state.clocks.count * clockBitsPerTick()) / (clockTickTime() / 1000);
 
   return (
     <>
@@ -124,8 +197,25 @@ function App() {
         <div>
           bits flipped:
           <span style={{}}>{state.bits.count}</span>
+          <Show when={state.clocks.count > 0} fallback={null}>
+            <span style={{ color: "#339933" }}>
+              (+{automaticBitsPerSecond().toFixed(1)}/s)
+            </span>
+          </Show>
         </div>
-        <Show fallback={null}></Show>
+        <Show when={state.progress.clocksUnlocked} fallback={null}>
+          <button onClick={buyClock} disabled={bits() < clockCost()}>
+            synchronize clock ({clockCost()}b)
+          </button>
+        </Show>
+        <Show when={state.progress.flipflopUnlocked} fallback={null}>
+          <button onClick={buyFlipFlop} disabled={bits() < flipFlopCost()}>
+            synthesize embedding ({flipFlopCost()}b)
+          </button>
+        </Show>
+        <Show when={maxBits() > 0} fallback={null}>
+          <div>memory: {maxBits()} bits</div>
+        </Show>
       </div>
     </>
   );
