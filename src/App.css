@@ -41,3 +41,8 @@
 .bit:disabled {
   cursor: not-allowed;
 }
+
+.bit-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;
+}

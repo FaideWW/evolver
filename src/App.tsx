@@ -1,4 +1,4 @@
-import { Accessor, For, Show, createSignal } from "solid-js";
+import { For, Show, createSignal } from "solid-js";
 import "./App.css";
 import { createStore, produce } from "solid-js/store";
 
@@ -9,6 +9,7 @@ const BASE_VALUES = {
   memoryPerFlipFlop: 2,
   clockTickSpeedMS: 10000,
   clockBitsPerTick: 1,
+  bitCost: 8,
   clockCost: 8,
   clockCostAddedCostScalars: [0, 1, 2, 4, 6, 8],
   clockCostCostMultiplier: 2,
@@ -28,6 +29,7 @@ const [state, setState] = createStore({
   },
   bits: {
     current: 1,
+    purchased: 0,
     _: [
       {
         lastFlip: new Date(0),
@@ -52,6 +54,7 @@ const [state, setState] = createStore({
   progress: {
     expandedMemoryUnlocked: false,
     clocksUnlocked: false,
+    moreBitsUnlocked: false,
   },
 });
 
@@ -86,19 +89,34 @@ const bitFlipCooldownProgress = (bitIndex: number, time: Date) =>
     Math.min(
       1,
       (time.getTime() - state.bits._[bitIndex].lastFlip.getTime()) /
-      bitFlipCooldown()
+        bitFlipCooldown()
     )
   );
 const bitFlippable = (bitIndex: number, time: Date) =>
   bitFlipCooldownProgress(bitIndex, time) >= 1;
 
+const bitCost = () => BASE_VALUES.bitCost;
+
+const buyBit = () =>
+  setState(
+    produce((draft) => {
+      draft.bits._.push({
+        lastFlip: new Date(0),
+        automated: false,
+      });
+      draft.bits.current++;
+      draft.bits.purchased++;
+      draft.information.current -= bitCost();
+    })
+  );
+
 const clockCost = () =>
   state.clocks.count >= BASE_VALUES.clockCostAddedCostScalars.length
     ? BASE_VALUES.clockCost *
-    BASE_VALUES.clockCostCostMultiplier **
-    (BASE_VALUES.clockCostCostMultiplierPerClock * state.clocks.count)
+      BASE_VALUES.clockCostCostMultiplier **
+        (BASE_VALUES.clockCostCostMultiplierPerClock * state.clocks.count)
     : BASE_VALUES.clockCost +
-    BASE_VALUES.clockCostAddedCostScalars[state.clocks.count];
+      BASE_VALUES.clockCostAddedCostScalars[state.clocks.count];
 // const decayInformation = (time: Date) => {
 //   const exceededBy = information() - maxInformation();
 //   if (exceededBy > 0) {
@@ -119,11 +137,11 @@ const clickBit = (bitIndex: number) =>
         // TODO: initiate decay
       }
       draft.information.current = nextInfo;
-      console.log(`flipping bit. new bits: ${draft.bits.current}`);
+      console.log(`flipping bit. new info: ${information()}`);
 
-      // if (!draft.progress.clocksUnlocked && draft.bits.current >= clockCost()) {
-      //   draft.progress.clocksUnlocked = true;
-      // }
+      if (!draft.progress.moreBitsUnlocked && information() >= bitCost()) {
+        draft.progress.moreBitsUnlocked = true;
+      }
     })
   );
 
@@ -177,15 +195,20 @@ function App() {
     <>
       <div class="card">
         <div>Current time: {now().toISOString()}</div>
-        <BitGrid now={now} />
+        <BitGrid now={now()} />
         <div>
           information:
           <span style={{}}>
             {state.information.current}/{state.information.max}
           </span>
         </div>
+        <Show when={state.progress.moreBitsUnlocked} fallback={null}>
+          <button onClick={buyBit} disabled={information() < bitCost()}>
+            new bit ({bitCost()}b)
+          </button>
+        </Show>
         <Show when={state.progress.clocksUnlocked} fallback={null}>
-          <button onClick={buyClock} disabled={bits() < clockCost()}>
+          <button onClick={buyClock} disabled={information() < clockCost()}>
             clock ({clockCost()}b)
           </button>
           <div>
@@ -198,13 +221,12 @@ function App() {
   );
 }
 
-function BitGrid(props: { now: Accessor<Date> }) {
-  const { now } = props;
+function BitGrid(props: { now: Date }) {
   return (
-    <div>
+    <div class="bit-grid">
       <For each={state.bits._}>
         {(_bit, i) => {
-          const flippable = () => bitFlippable(i(), now());
+          const flippable = () => bitFlippable(i(), props.now);
           return (
             <button
               class="bit"
@@ -212,7 +234,7 @@ function BitGrid(props: { now: Accessor<Date> }) {
                 "background-color": interpolate(
                   "#cc3333",
                   "#ffffff",
-                  bitFlipCooldownProgress(i(), now())
+                  bitFlipCooldownProgress(i(), props.now)
                 ),
               }}
               disabled={!flippable()}
