@@ -1,7 +1,12 @@
-import { For, Show, createSignal } from "solid-js";
+import { For, Show, createSignal, onCleanup } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import "./App.css";
-import { displayTime, interpolate } from "./utils";
+import {
+  UnitNotationOption,
+  displayCurrency,
+  displayTime,
+  interpolate,
+} from "./utils";
 
 interface ParallelProcessor {
   lastFlip: Date;
@@ -20,18 +25,19 @@ const BASE_VALUES = {
   bitMuxCost: 64,
   bitMuxUnlockBitCount: 4,
 
-  parallelProcCost: 128,
-  parallelProcCostMultiPerPurchased: 2,
+  parallelProcBitsUnlockThreshold: 4,
+  parallelProcCost: 32,
+  parallelProcCostMultiPerPurchased: 1.5,
   parallelProcCooldownMS: 2000,
 
   bitCooldownUpgradeBitsUnlockThreshold: 4,
   bitCooldownUpgradeCost: 32,
-  bitCooldownUpgradeCostMultiplierPerPurchased: 2,
+  bitCooldownUpgradeCostMultiplierPerPurchased: 1.2,
   bitCooldownMultiPerUpgrade: 1.1,
 
   bitAddedInfoUpgradeBitsUnlockThreshold: 4,
   bitAddedInfoUpgradeCost: 32,
-  bitAddedInfoUpgradeCostMultiplierPerPurchased: 2,
+  bitAddedInfoUpgradeCostMultiplierPerPurchased: 1.2,
   bitAddedInfoPerUpgrade: 0.1,
 
   bitInfoMultiUpgradeBitsUnlockThreshold: 64,
@@ -41,8 +47,8 @@ const BASE_VALUES = {
 
   maxInfoUpgradeInfoUnlockThreshold: 256,
   maxInfoUpgradeCost: 128,
-  maxInfoUpgradeCostMultiplierPerPurchased: 2,
-  maxInfoMultiPerUpgrade: 2,
+  maxInfoUpgradeCostMultiplierPerPurchased: 1.5,
+  maxInfoMultiPerUpgrade: 1.5,
 
   ppCooldownUpgradeCost: 128,
   ppCooldownUpgradeCostMultiplierPerPurchased: 2,
@@ -79,7 +85,7 @@ const [state, setState] = createStore({
     purchased: 0,
     _: [] as ParallelProcessor[],
     purchasedUpgrades: {
-      cooldownMultiplier: 1,
+      cooldownMultiplier: 0,
     },
   },
   unlocks: {
@@ -95,6 +101,10 @@ const [state, setState] = createStore({
     bitAddedInfoUpgradeUnlocked: false,
     bitInfoMultiplierUpgradeUnlocked: false,
     maxInformationUpgradeUnlocked: false,
+    ppCooldownUpgradeUnlocked: false,
+  },
+  settings: {
+    infoUnitNotation: "Windows" as UnitNotationOption,
   },
 });
 
@@ -138,29 +148,47 @@ const bitFlippable = (bitIndex: number, time: Date) =>
   bitFlipCooldownProgress(bitIndex, time) >= 1;
 
 const bitCost = (n: number = state.bits.purchased) =>
-  BASE_VALUES.bitCost * BASE_VALUES.bitCostCostMultiplier ** n;
+  Math.round(BASE_VALUES.bitCost * BASE_VALUES.bitCostCostMultiplier ** n);
 
 const parallelProcCost = (n: number = state.parallelProcs.purchased) =>
-  BASE_VALUES.parallelProcCost *
-  BASE_VALUES.parallelProcCostMultiPerPurchased ** n;
+  Math.round(
+    BASE_VALUES.parallelProcCost *
+      BASE_VALUES.parallelProcCostMultiPerPurchased ** n
+  );
 
 const bitCooldownUpgradeCost = (
   n: number = state.bits.purchasedUpgrades.cooldownMultiplier
 ) =>
-  BASE_VALUES.bitCooldownUpgradeCost *
-  BASE_VALUES.bitCooldownUpgradeCostMultiplierPerPurchased ** n;
+  Math.round(
+    BASE_VALUES.bitCooldownUpgradeCost *
+      BASE_VALUES.bitCooldownUpgradeCostMultiplierPerPurchased ** n
+  );
 
 const bitAddedInfoUpgradeCost = (
   n: number = state.bits.purchasedUpgrades.addedInformation
 ) =>
-  BASE_VALUES.bitAddedInfoUpgradeCost *
-  BASE_VALUES.bitAddedInfoUpgradeCostMultiplierPerPurchased ** n;
+  Math.round(
+    BASE_VALUES.bitAddedInfoUpgradeCost *
+      BASE_VALUES.bitAddedInfoUpgradeCostMultiplierPerPurchased ** n
+  );
 
 const maxInfoUpgradeCost = (
   n: number = state.information.purchasedUpgrades.maxMultiplier
 ) =>
-  BASE_VALUES.maxInfoUpgradeCost *
-  BASE_VALUES.maxInfoUpgradeCostMultiplierPerPurchased ** n;
+  Math.round(
+    BASE_VALUES.maxInfoUpgradeCost *
+      BASE_VALUES.maxInfoUpgradeCostMultiplierPerPurchased ** n
+  );
+
+const ppCooldownUpgradeCost = (
+  n: number = state.parallelProcs.purchasedUpgrades.cooldownMultiplier
+) =>
+  Math.round(
+    BASE_VALUES.ppCooldownUpgradeCost *
+      BASE_VALUES.ppCooldownUpgradeCostMultiplierPerPurchased ** n
+  );
+
+const bitMuxCost = () => Math.round(BASE_VALUES.bitMuxCost);
 
 const nextAvailableBit = (time: Date) => {
   // bit mux is available if any bit is available
@@ -213,6 +241,12 @@ const buyBit = () =>
         ) {
           draft.progress.bitInfoMultiplierUpgradeUnlocked = true;
         }
+        if (
+          !draft.progress.parallelProcsUnlocked &&
+          bits() >= BASE_VALUES.parallelProcBitsUnlockThreshold
+        ) {
+          draft.progress.parallelProcsUnlocked = true;
+        }
       }
     })
   );
@@ -229,7 +263,6 @@ const flipBit = (bitIndex: number, time: Date = new Date()) =>
         // TODO: initiate decay
       }
       draft.information.current = nextInfo;
-      console.log(`flipping bit. new info: ${information()}`);
 
       if (!draft.progress.moreBitsUnlocked && information() >= bitCost()) {
         draft.progress.moreBitsUnlocked = true;
@@ -251,13 +284,9 @@ const clickBit = (bitIndex: number, time: Date = new Date()) =>
 const buyBitMux = () =>
   setState(
     produce((draft) => {
-      if (draft.information.current >= BASE_VALUES.bitMuxCost) {
+      if (draft.information.current >= bitMuxCost()) {
         draft.unlocks.bitMux = true;
-        draft.information.current -= BASE_VALUES.bitMuxCost;
-
-        if (!draft.progress.parallelProcsUnlocked) {
-          draft.progress.parallelProcsUnlocked = true;
-        }
+        draft.information.current -= bitMuxCost();
       }
     })
   );
@@ -266,11 +295,15 @@ const buyParallelProc = () =>
   setState(
     produce((draft) => {
       if (information() > parallelProcCost()) {
+        draft.information.current -= parallelProcCost();
         draft.parallelProcs._.push({
           lastFlip: new Date(0),
         });
-        draft.information.current -= parallelProcCost();
         draft.parallelProcs.purchased++;
+
+        if (!draft.progress.ppCooldownUpgradeUnlocked) {
+          draft.progress.ppCooldownUpgradeUnlocked = true;
+        }
       }
     })
   );
@@ -299,7 +332,18 @@ const buyMaxInfoUpgrade = () =>
   setState(
     produce((draft) => {
       if (information() >= maxInfoUpgradeCost()) {
+        draft.information.current -= maxInfoUpgradeCost();
         draft.information.purchasedUpgrades.maxMultiplier++;
+      }
+    })
+  );
+
+const buyPPCooldownUpgrade = () =>
+  setState(
+    produce((draft) => {
+      if (information() >= ppCooldownUpgradeCost()) {
+        draft.information.current -= ppCooldownUpgradeCost();
+        draft.parallelProcs.purchasedUpgrades.cooldownMultiplier++;
       }
     })
   );
@@ -334,17 +378,23 @@ const tick = (next: Date) => {
   );
 };
 
+const currency = (n: number) =>
+  displayCurrency(n, state.settings.infoUnitNotation);
+
 function App() {
   const [now, setNow] = createSignal(new Date());
+  let raf: number;
 
   const step = () => {
     const nextNow = new Date();
     tick(nextNow);
     setNow(nextNow);
-    window.requestAnimationFrame(step);
+    raf = window.requestAnimationFrame(step);
   };
 
-  window.requestAnimationFrame(step);
+  raf = window.requestAnimationFrame(step);
+
+  onCleanup(() => window.cancelAnimationFrame(raf));
 
   return (
     <>
@@ -359,19 +409,13 @@ function App() {
         <div id="game-state">
           information:
           <span style={{}}>
-            {information().toLocaleString(undefined, {
-              maximumFractionDigits: 2,
-            })}
-            /
-            {maxInformation().toLocaleString(undefined, {
-              maximumFractionDigits: 2,
-            })}
+            {currency(information())}/{currency(maxInformation())}
           </span>
         </div>
         <div id="purchases">
           <Show when={state.progress.moreBitsUnlocked} fallback={null}>
             <button onClick={buyBit} disabled={information() < bitCost()}>
-              new bit ({bitCost()}b)
+              new bit ({currency(bitCost())})
             </button>
           </Show>
           <Show when={state.progress.parallelProcsUnlocked} fallback={null}>
@@ -379,7 +423,7 @@ function App() {
               onClick={buyParallelProc}
               disabled={information() < parallelProcCost()}
             >
-              new parallel processor ({parallelProcCost()}b)
+              new auto flipper ({currency(parallelProcCost())})
             </button>
           </Show>
         </div>
@@ -392,12 +436,14 @@ function App() {
               onClick={buyMaxInfoUpgrade}
               disabled={information() < maxInfoUpgradeCost()}
             >
-              <div>memory increase ({maxInfoUpgradeCost()}b)</div>
+              <div>memory increase ({currency(maxInfoUpgradeCost())})</div>
               <div>
-                {maxInformation()}
+                {currency(maxInformation())}
                 {"->"}
-                {maxInformation(
-                  state.information.purchasedUpgrades.maxMultiplier + 1
+                {currency(
+                  maxInformation(
+                    state.information.purchasedUpgrades.maxMultiplier + 1
+                  )
                 )}
               </div>
             </button>
@@ -410,13 +456,9 @@ function App() {
               onClick={buyBitCooldownUpgrade}
               disabled={information() < bitCooldownUpgradeCost()}
             >
-              <div>bit cooldown ({bitCooldownUpgradeCost()}b)</div>
+              <div>bit cooldown ({currency(bitCooldownUpgradeCost())})</div>
               <div>
-                {displayTime(
-                  bitFlipCooldown(
-                    state.bits.purchasedUpgrades.cooldownMultiplier
-                  )
-                )}
+                {displayTime(bitFlipCooldown())}
                 {"->"}
                 {displayTime(
                   bitFlipCooldown(
@@ -434,12 +476,35 @@ function App() {
               onClick={buyBitAddedInfoUpgrade}
               disabled={information() < bitAddedInfoUpgradeCost()}
             >
-              <div>info per bitflip ({bitAddedInfoUpgradeCost()}b)</div>
               <div>
-                {bitInfoPerFlip(state.bits.purchasedUpgrades.addedInformation)}
+                info per bitflip ({currency(bitAddedInfoUpgradeCost())})
+              </div>
+              <div>
+                {currency(bitInfoPerFlip())}
                 {"->"}
-                {bitInfoPerFlip(
-                  state.bits.purchasedUpgrades.addedInformation + 1
+                {currency(
+                  bitInfoPerFlip(
+                    state.bits.purchasedUpgrades.addedInformation + 1
+                  )
+                )}
+              </div>
+            </button>
+          </Show>
+          <Show when={state.progress.ppCooldownUpgradeUnlocked} fallback={null}>
+            <button
+              onClick={buyPPCooldownUpgrade}
+              disabled={information() < ppCooldownUpgradeCost()}
+            >
+              <div>
+                autoflipper cooldown ({currency(ppCooldownUpgradeCost())})
+              </div>
+              <div>
+                {displayTime(parallelProcCooldown())}
+                {"->"}
+                {displayTime(
+                  parallelProcCooldown(
+                    state.parallelProcs.purchasedUpgrades.cooldownMultiplier + 1
+                  )
                 )}
               </div>
             </button>
@@ -453,7 +518,7 @@ function App() {
                 state.unlocks.bitMux || information() < BASE_VALUES.bitMuxCost
               }
             >
-              multiplexer ({BASE_VALUES.bitMuxCost}b)
+              multiplexer ({currency(BASE_VALUES.bitMuxCost)})
             </button>
           </Show>
         </div>

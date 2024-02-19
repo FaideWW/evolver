@@ -1,3 +1,9 @@
+export type UnitNotationOption =
+  | "Windows"
+  | "IEC (decimal)"
+  | "IEC (binary)"
+  | "Scientific";
+
 export const interpolate = (color1: string, color2: string, t: number) => {
   // Convert the hex colors to RGB values
   const r1 = parseInt(color1.substring(1, 3), 16);
@@ -26,4 +32,36 @@ export const displayTime = (ms: number) => {
   } else {
     return `${ms.toFixed(0)}ms`;
   }
+};
+
+const unitPrefixes: Partial<Record<UnitNotationOption, string[]>> = {
+  Windows: ["", "K", "M", "G", "T", "P", "E", "Z", "Y", "R", "Q"],
+  "IEC (decimal)": ["", "k", "M", "G", "T", "P", "E", "Z", "Y", "R", "Q"],
+  "IEC (binary)": [
+    "",
+    "Ki",
+    "Mi",
+    "Gi",
+    "Ti",
+    "Pi",
+    "Ei",
+    "Zi",
+    "Yi",
+    "Ri",
+    "Qi",
+  ],
+};
+
+export const displayCurrency = (b: number, notation: UnitNotationOption) => {
+  let scaledB = b;
+  let orders = 0;
+  const divisor = notation === "IEC (decimal)" ? 1000 : 1024;
+  while (scaledB >= divisor && orders < unitPrefixes[notation].length) {
+    scaledB /= divisor;
+    orders++;
+  }
+
+  return `${scaledB.toLocaleString(undefined, { maximumFractionDigits: 2 })}${
+    unitPrefixes[notation][orders]
+  }b`;
 };
