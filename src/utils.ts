@@ -34,7 +34,7 @@ export const displayTime = (ms: number) => {
   }
 };
 
-const unitPrefixes: Partial<Record<UnitNotationOption, string[]>> = {
+const unitPrefixes: Record<UnitNotationOption, string[]> = {
   Windows: ["", "K", "M", "G", "T", "P", "E", "Z", "Y", "R", "Q"],
   "IEC (decimal)": ["", "k", "M", "G", "T", "P", "E", "Z", "Y", "R", "Q"],
   "IEC (binary)": [
@@ -50,9 +50,13 @@ const unitPrefixes: Partial<Record<UnitNotationOption, string[]>> = {
     "Ri",
     "Qi",
   ],
+  Scientific: [],
 };
 
 export const displayCurrency = (b: number, notation: UnitNotationOption) => {
+  if (notation === "Scientific") {
+    return "";
+  }
   let scaledB = b;
   let orders = 0;
   const divisor = notation === "IEC (decimal)" ? 1000 : 1024;
