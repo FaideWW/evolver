@@ -52,3 +52,21 @@
   grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;
   gap: 2px;
 }
+
+.bit-mux {
+  position: relative;
+}
+
+.bit-mux:disabled {
+  cursor: normal;
+}
+
+.progress {
+  background: #ccc;
+  opacity: 0.2;
+  width: 0%;
+  height: 100%;
+  position: absolute;
+  top: 0;
+  right: 0;
+}

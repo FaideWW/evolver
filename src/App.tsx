@@ -1,4 +1,4 @@
-import { For, Show, createSignal, onCleanup } from "solid-js";
+import { For, Show, createEffect, createSignal, onCleanup } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import "./App.css";
 import {
@@ -75,6 +75,7 @@ const [state, setState] = createStore({
         lastFlip: new Date(0),
       },
     ],
+    lastMuxClick: new Date(0),
     purchasedUpgrades: {
       cooldownMultiplier: 0,
       addedInformation: 0,
@@ -144,6 +145,22 @@ const bitFlipCooldownProgress = (bitIndex: number, time: Date) =>
         bitFlipCooldown()
     )
   );
+
+const bitMuxCooldownProgress = (
+  now: Date,
+  lastClick: Date = state.bits.lastMuxClick
+) => {
+  const nextRefresh = nextBitRefresh(now);
+  return Math.max(
+    0,
+    Math.min(
+      1,
+      (now.getTime() - lastClick.getTime()) /
+        (nextRefresh.getTime() - lastClick.getTime())
+    )
+  );
+};
+
 const bitFlippable = (bitIndex: number, time: Date) =>
   bitFlipCooldownProgress(bitIndex, time) >= 1;
 
@@ -190,7 +207,24 @@ const ppCooldownUpgradeCost = (
 
 const bitMuxCost = () => Math.round(BASE_VALUES.bitMuxCost);
 
-const nextAvailableBit = (time: Date) => {
+const nextBitRefresh = (time: Date = new Date()) => {
+  let nextRefresh: Date | undefined = undefined;
+  for (let i = 0; i < state.bits._.length; i++) {
+    if (bitFlippable(i, time)) {
+      return time;
+    } else {
+      const refreshAt = new Date(
+        state.bits._[i].lastFlip.getTime() + bitFlipCooldown()
+      );
+      if (nextRefresh === undefined || nextRefresh > refreshAt) {
+        nextRefresh = refreshAt;
+      }
+    }
+  }
+  return nextRefresh as Date;
+};
+
+const firstAvailableBit = (time: Date) => {
   // bit mux is available if any bit is available
   for (let i = 0; i < state.bits._.length; i++) {
     if (bitFlippable(i, time)) {
@@ -201,7 +235,7 @@ const nextAvailableBit = (time: Date) => {
 };
 
 const bitMuxAvailable = (time: Date) => {
-  return nextAvailableBit(time) !== -1;
+  return firstAvailableBit(time) !== -1;
 };
 
 const buyBit = () =>
@@ -351,13 +385,18 @@ const buyPPCooldownUpgrade = () =>
 const flipBitMux = () => {
   const now = new Date();
   // find any available bit and flip it
-  const nextBit = nextAvailableBit(now);
+  const nextBit = firstAvailableBit(now);
 
   if (nextBit === -1) {
     return false;
   }
 
-  clickBit(nextBit, now);
+  setState(
+    produce((draft) => {
+      clickBit(nextBit, now);
+      draft.bits.lastMuxClick = now;
+    })
+  );
   return true;
 };
 
@@ -400,11 +439,17 @@ function App() {
     <>
       <div class="card">
         <div>Current time: {now().toISOString()}</div>
-        <Show when={state.unlocks.bitMux}>
-          <button onClick={flipBitMux} disabled={!bitMuxAvailable(now())}>
-            flip bit
-          </button>
-        </Show>
+        <button
+          onClick={flipBitMux}
+          disabled={!bitMuxAvailable(now())}
+          class="bit-mux"
+        >
+          flip bit
+          <div
+            class="progress"
+            style={{ width: `${(1 - bitMuxCooldownProgress(now())) * 100}%` }}
+          />
+        </button>
         <BitGrid now={now()} />
         <div id="game-state">
           information:
@@ -510,18 +555,7 @@ function App() {
             </button>
           </Show>
         </div>
-        <div id="unlocks">
-          <Show when={state.progress.bitMuxUnlocked} fallback={null}>
-            <button
-              onClick={buyBitMux}
-              disabled={
-                state.unlocks.bitMux || information() < BASE_VALUES.bitMuxCost
-              }
-            >
-              multiplexer ({currency(BASE_VALUES.bitMuxCost)})
-            </button>
-          </Show>
-        </div>
+        <div id="unlocks"></div>
       </div>
     </>
   );
