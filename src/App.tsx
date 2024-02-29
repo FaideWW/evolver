@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, onCleanup } from "solid-js";
+import { For, Show, createSignal, onCleanup } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import "./App.css";
 import {
@@ -205,7 +205,7 @@ const ppCooldownUpgradeCost = (
       BASE_VALUES.ppCooldownUpgradeCostMultiplierPerPurchased ** n
   );
 
-const bitMuxCost = () => Math.round(BASE_VALUES.bitMuxCost);
+// const bitMuxCost = () => Math.round(BASE_VALUES.bitMuxCost);
 
 const nextBitRefresh = (time: Date = new Date()) => {
   let nextRefresh: Date | undefined = undefined;
@@ -315,15 +315,15 @@ const flipBit = (bitIndex: number, time: Date = new Date()) =>
 const clickBit = (bitIndex: number, time: Date = new Date()) =>
   flipBit(bitIndex, time);
 
-const buyBitMux = () =>
-  setState(
-    produce((draft) => {
-      if (draft.information.current >= bitMuxCost()) {
-        draft.unlocks.bitMux = true;
-        draft.information.current -= bitMuxCost();
-      }
-    })
-  );
+// const buyBitMux = () =>
+//   setState(
+//     produce((draft) => {
+//       if (draft.information.current >= bitMuxCost()) {
+//         draft.unlocks.bitMux = true;
+//         draft.information.current -= bitMuxCost();
+//       }
+//     })
+//   );
 
 const buyParallelProc = () =>
   setState(
@@ -555,7 +555,7 @@ function App() {
             </button>
           </Show>
         </div>
-        <div id="unlocks"></div>
+        <div id="unlocks" />
       </div>
     </>
   );

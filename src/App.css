@@ -58,12 +58,11 @@
 }
 
 .bit-mux:disabled {
-  cursor: normal;
+  cursor: default;
 }
 
 .progress {
   background: #ccc;
-  opacity: 0.2;
   width: 0%;
   height: 100%;
   position: absolute;
