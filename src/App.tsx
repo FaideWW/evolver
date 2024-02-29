@@ -112,7 +112,7 @@ const [state, setState] = createStore({
 const information = () => state.information.current;
 const maxInformation = (
   n: number = state.information.purchasedUpgrades.maxMultiplier
-) => BASE_VALUES.maxInformation * BASE_VALUES.bitInfoMultiPerUpgrade ** n;
+) => BASE_VALUES.maxInformation * BASE_VALUES.maxInfoMultiPerUpgrade ** n;
 
 const bits = () => state.bits._.length;
 const parallelProcs = () => state.parallelProcs._.length;
