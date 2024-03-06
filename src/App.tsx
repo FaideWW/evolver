@@ -25,6 +25,11 @@ const BASE_VALUES = {
   bitMuxCost: 64,
   bitMuxUnlockBitCount: 4,
 
+  bitParallelFlips: 1,
+  bitParallelFlipCost: 64,
+  bitParallelFlipCostMultiPerPurchased: 1.15,
+  bitParallelFlipAddedFlipsPerUpgrade: 1,
+
   parallelProcBitsUnlockThreshold: 4,
   parallelProcCost: 32,
   parallelProcCostMultiPerPurchased: 1.5,
@@ -72,7 +77,7 @@ const [state, setState] = createStore({
     purchased: 0,
     _: [
       {
-        lastFlip: new Date(0),
+        flips: [new Date(0)],
       },
     ],
     lastMuxClick: new Date(0),
@@ -80,6 +85,7 @@ const [state, setState] = createStore({
       cooldownMultiplier: 0,
       addedInformation: 0,
       informationMulti: 0,
+      parallelFlips: 0,
     },
   },
   parallelProcs: {
@@ -97,6 +103,7 @@ const [state, setState] = createStore({
     clocksUnlocked: false,
     moreBitsUnlocked: false,
     bitMuxUnlocked: false,
+    bitParallelFlipsUnlocked: false,
     parallelProcsUnlocked: false,
     bitCooldownUpgradeUnlocked: false,
     bitAddedInfoUpgradeUnlocked: false,
@@ -116,6 +123,11 @@ const maxInformation = (
 
 const bits = () => state.bits._.length;
 const parallelProcs = () => state.parallelProcs._.length;
+const bitParallelFlips = (
+  n: number = state.bits.purchasedUpgrades.parallelFlips
+) =>
+  BASE_VALUES.bitParallelFlips +
+  BASE_VALUES.bitParallelFlipAddedFlipsPerUpgrade * n;
 
 const bitFlipCooldown = (
   n: number = state.bits.purchasedUpgrades.cooldownMultiplier
@@ -137,12 +149,10 @@ const bitInfoPerFlip = (
   (1 * BASE_VALUES.bitInfoMultiPerUpgrade ** n);
 
 const bitFlipCooldownProgress = (bitIndex: number, time: Date) =>
-  Math.max(
-    0,
-    Math.min(
-      1,
-      (time.getTime() - state.bits._[bitIndex].lastFlip.getTime()) /
-        bitFlipCooldown()
+  state.bits._[bitIndex].flips.map((flip) =>
+    Math.max(
+      0,
+      Math.min(1, (time.getTime() - flip.getTime()) / bitFlipCooldown())
     )
   );
 
@@ -161,8 +171,15 @@ const bitMuxCooldownProgress = (
   );
 };
 
+const bitAvailableAt = (bitIndex: number) =>
+  new Date(
+    Math.min(...state.bits._[bitIndex].flips.map((flip) => flip.getTime())) +
+      bitFlipCooldown()
+  );
+
 const bitFlippable = (bitIndex: number, time: Date) =>
-  bitFlipCooldownProgress(bitIndex, time) >= 1;
+  bitFlipCooldownProgress(bitIndex, time).some((prog) => prog >= 1) ||
+  state.bits._[bitIndex].flips.length < bitParallelFlips();
 
 const bitCost = (n: number = state.bits.purchased) =>
   Math.round(BASE_VALUES.bitCost * BASE_VALUES.bitCostCostMultiplier ** n);
@@ -205,6 +222,14 @@ const ppCooldownUpgradeCost = (
       BASE_VALUES.ppCooldownUpgradeCostMultiplierPerPurchased ** n
   );
 
+const bitParallelFlipCost = (
+  n: number = state.bits.purchasedUpgrades.parallelFlips
+) =>
+  Math.round(
+    BASE_VALUES.bitParallelFlipCost *
+      BASE_VALUES.parallelProcCostMultiPerPurchased ** n
+  );
+
 // const bitMuxCost = () => Math.round(BASE_VALUES.bitMuxCost);
 
 const nextBitRefresh = (time: Date = new Date()) => {
@@ -213,9 +238,7 @@ const nextBitRefresh = (time: Date = new Date()) => {
     if (bitFlippable(i, time)) {
       return time;
     } else {
-      const refreshAt = new Date(
-        state.bits._[i].lastFlip.getTime() + bitFlipCooldown()
-      );
+      const refreshAt = bitAvailableAt(i);
       if (nextRefresh === undefined || nextRefresh > refreshAt) {
         nextRefresh = refreshAt;
       }
@@ -243,7 +266,7 @@ const buyBit = () =>
     produce((draft) => {
       if (information() >= bitCost()) {
         draft.bits._.push({
-          lastFlip: new Date(0),
+          flips: [new Date(0)],
         });
         draft.information.current -= bitCost();
         draft.bits.purchased++;
@@ -292,7 +315,12 @@ const flipBit = (bitIndex: number, time: Date = new Date()) =>
         maxInformation(),
         information() + bitInfoPerFlip()
       );
-      draft.bits._[bitIndex].lastFlip = time;
+      if (draft.bits._[bitIndex].flips.length === bitParallelFlips()) {
+        draft.bits._[bitIndex].flips.shift();
+      }
+
+      draft.bits._[bitIndex].flips.push(time);
+
       if (information() <= maxInformation() && nextInfo > maxInformation()) {
         // TODO: initiate decay
       }
@@ -307,6 +335,13 @@ const flipBit = (bitIndex: number, time: Date = new Date()) =>
         information() >= maxInfoUpgradeCost(0)
       ) {
         draft.progress.maxInformationUpgradeUnlocked = true;
+      }
+
+      if (
+        !draft.progress.bitParallelFlipsUnlocked &&
+        information() >= bitParallelFlipCost(0)
+      ) {
+        draft.progress.bitParallelFlipsUnlocked = true;
       }
     })
   );
@@ -378,6 +413,16 @@ const buyPPCooldownUpgrade = () =>
       if (information() >= ppCooldownUpgradeCost()) {
         draft.information.current -= ppCooldownUpgradeCost();
         draft.parallelProcs.purchasedUpgrades.cooldownMultiplier++;
+      }
+    })
+  );
+
+const buyBitParallelFlip = () =>
+  setState(
+    produce((draft) => {
+      if (information() >= bitParallelFlipCost()) {
+        draft.information.current -= bitParallelFlipCost();
+        draft.bits.purchasedUpgrades.parallelFlips++;
       }
     })
   );
@@ -473,6 +518,21 @@ function App() {
           </Show>
         </div>
         <div id="upgrades">
+          <Show when={state.progress.bitParallelFlipsUnlocked} fallback={null}>
+            <button
+              onClick={buyBitParallelFlip}
+              disabled={information() < bitParallelFlipCost()}
+            >
+              <div>flips per bit ({currency(bitParallelFlipCost())})</div>
+              <div>
+                {bitParallelFlips()}
+                {"->"}
+                {bitParallelFlips(
+                  state.bits.purchasedUpgrades.parallelFlips + 1
+                )}
+              </div>
+            </button>
+          </Show>
           <Show
             when={state.progress.maxInformationUpgradeUnlocked}
             fallback={null}
@@ -574,7 +634,7 @@ function BitGrid(props: { now: Date }) {
                 "background-color": interpolate(
                   "#cc3333",
                   "#ffffff",
-                  bitFlipCooldownProgress(i(), props.now)
+                  Math.min(...bitFlipCooldownProgress(i(), props.now))
                 ),
               }}
               disabled={!flippable()}
