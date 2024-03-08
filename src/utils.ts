@@ -4,7 +4,7 @@ export type UnitNotationOption =
   | "IEC (binary)"
   | "Scientific";
 
-export const interpolate = (color1: string, color2: string, t: number) => {
+export const cssInterpolate = (color1: string, color2: string, t: number) => {
   // Convert the hex colors to RGB values
   const r1 = parseInt(color1.substring(1, 3), 16);
   const g1 = parseInt(color1.substring(3, 5), 16);
@@ -69,3 +69,29 @@ export const displayCurrency = (b: number, notation: UnitNotationOption) => {
     unitPrefixes[notation][orders]
   }b`;
 };
+
+export function addedScale(
+  baseCost: number,
+  added: number
+): (a: number) => number {
+  return (a) => baseCost + added * a;
+}
+
+export function multiScale(
+  baseCost: number,
+  multiplier: number
+): (m: number) => number {
+  return (m) => baseCost * multiplier ** m;
+}
+
+export function doubleScale(
+  baseCost: number,
+  added: number,
+  multiplier: number
+): (a: number, m: number) => number {
+  return (a, m) => (baseCost + added * a) * multiplier ** m;
+}
+
+export function clamp(min: number, max: number, value: number) {
+  return Math.max(min, Math.min(max, value));
+}

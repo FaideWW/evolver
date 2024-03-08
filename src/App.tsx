@@ -1,25 +1,23 @@
-import { For, Show, createSignal, onCleanup } from "solid-js";
+import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import "./App.css";
 import {
   UnitNotationOption,
+  addedScale,
+  clamp,
+  cssInterpolate,
   displayCurrency,
   displayTime,
-  interpolate,
+  doubleScale,
+  multiScale,
 } from "./utils";
-
-interface ParallelProcessor {
-  lastFlip: Date;
-}
+import { bus } from "./events";
 
 const BASE_VALUES = {
   maxInformation: 256,
   informationDecayRatePerSecondPerPercentExceeded: 0.01,
   bitFlipCooldownMS: 1000,
   informationPerBitFlip: 1,
-  memoryPerFlipFlop: 2,
-  clockTickSpeedMS: 10000,
-  clockBitsPerTick: 1,
   bitCost: 8,
   bitCostCostMultiplier: 2,
   bitMuxCost: 64,
@@ -30,10 +28,9 @@ const BASE_VALUES = {
   bitParallelFlipCostMultiPerPurchased: 1.15,
   bitParallelFlipAddedFlipsPerUpgrade: 1,
 
-  parallelProcBitsUnlockThreshold: 4,
-  parallelProcCost: 32,
-  parallelProcCostMultiPerPurchased: 1.5,
-  parallelProcCooldownMS: 2000,
+  autoFlipperCooldownMS: 2000,
+  autoFlipperBitsUnlockThreshold: 4,
+  autoFlipperCost: 32,
 
   bitCooldownUpgradeBitsUnlockThreshold: 4,
   bitCooldownUpgradeCost: 32,
@@ -43,7 +40,7 @@ const BASE_VALUES = {
   bitAddedInfoUpgradeBitsUnlockThreshold: 4,
   bitAddedInfoUpgradeCost: 32,
   bitAddedInfoUpgradeCostMultiplierPerPurchased: 1.2,
-  bitAddedInfoPerUpgrade: 0.1,
+  bitAddedInfoPerUpgrade: 1,
 
   bitInfoMultiUpgradeBitsUnlockThreshold: 64,
   bitInfoMultiUpgradeCost: 256,
@@ -55,9 +52,9 @@ const BASE_VALUES = {
   maxInfoUpgradeCostMultiplierPerPurchased: 1.5,
   maxInfoMultiPerUpgrade: 1.5,
 
-  ppCooldownUpgradeCost: 128,
-  ppCooldownUpgradeCostMultiplierPerPurchased: 2,
-  ppCooldownMultiPerUpgrade: 1.1,
+  autoFlipperCooldownUpgradeCost: 128,
+  autoFlipperCooldownUpgradeCostMultiplierPerPurchased: 1.15,
+  autoFlipperCooldownMultiPerUpgrade: 1.2,
 };
 
 const [state, setState] = createStore({
@@ -88,9 +85,10 @@ const [state, setState] = createStore({
       parallelFlips: 0,
     },
   },
-  parallelProcs: {
-    purchased: 0,
-    _: [] as ParallelProcessor[],
+  autoFlipper: {
+    purchased: false,
+    enabled: false,
+    lastFlip: new Date(0),
     purchasedUpgrades: {
       cooldownMultiplier: 0,
     },
@@ -104,12 +102,12 @@ const [state, setState] = createStore({
     moreBitsUnlocked: false,
     bitMuxUnlocked: false,
     bitParallelFlipsUnlocked: false,
-    parallelProcsUnlocked: false,
+    autoFlipperUnlocked: false,
     bitCooldownUpgradeUnlocked: false,
     bitAddedInfoUpgradeUnlocked: false,
     bitInfoMultiplierUpgradeUnlocked: false,
     maxInformationUpgradeUnlocked: false,
-    ppCooldownUpgradeUnlocked: false,
+    autoFlipperCooldownUpgradeUnlocked: false,
   },
   settings: {
     infoUnitNotation: "Windows" as UnitNotationOption,
@@ -119,41 +117,48 @@ const [state, setState] = createStore({
 const information = () => state.information.current;
 const maxInformation = (
   n: number = state.information.purchasedUpgrades.maxMultiplier
-) => BASE_VALUES.maxInformation * BASE_VALUES.maxInfoMultiPerUpgrade ** n;
+) =>
+  multiScale(BASE_VALUES.maxInformation, BASE_VALUES.maxInfoMultiPerUpgrade)(n);
 
 const bits = () => state.bits._.length;
-const parallelProcs = () => state.parallelProcs._.length;
 const bitParallelFlips = (
   n: number = state.bits.purchasedUpgrades.parallelFlips
 ) =>
-  BASE_VALUES.bitParallelFlips +
-  BASE_VALUES.bitParallelFlipAddedFlipsPerUpgrade * n;
+  addedScale(
+    BASE_VALUES.bitParallelFlips,
+    BASE_VALUES.bitParallelFlipAddedFlipsPerUpgrade
+  )(n);
 
 const bitFlipCooldown = (
   n: number = state.bits.purchasedUpgrades.cooldownMultiplier
 ) =>
-  BASE_VALUES.bitFlipCooldownMS *
-  (1 / BASE_VALUES.bitCooldownMultiPerUpgrade ** n);
+  multiScale(
+    BASE_VALUES.bitFlipCooldownMS,
+    1 / BASE_VALUES.bitCooldownMultiPerUpgrade
+  )(n);
 
-const parallelProcCooldown = (
-  n: number = state.parallelProcs.purchasedUpgrades.cooldownMultiplier
+const autoFlipperPurchased = () => state.autoFlipper.purchased;
+const autoFlipperCooldown = (
+  n: number = state.autoFlipper.purchasedUpgrades.cooldownMultiplier
 ) =>
-  BASE_VALUES.parallelProcCooldownMS *
-  (1 / BASE_VALUES.ppCooldownMultiPerUpgrade ** n);
+  multiScale(
+    BASE_VALUES.autoFlipperCooldownMS,
+    1 / BASE_VALUES.autoFlipperCooldownMultiPerUpgrade
+  )(n);
 
 const bitInfoPerFlip = (
   m: number = state.bits.purchasedUpgrades.addedInformation,
   n: number = state.bits.purchasedUpgrades.informationMulti
 ) =>
-  (BASE_VALUES.informationPerBitFlip + BASE_VALUES.bitAddedInfoPerUpgrade * m) *
-  (1 * BASE_VALUES.bitInfoMultiPerUpgrade ** n);
+  doubleScale(
+    BASE_VALUES.informationPerBitFlip,
+    BASE_VALUES.bitAddedInfoPerUpgrade,
+    BASE_VALUES.bitInfoMultiPerUpgrade
+  )(m, n);
 
 const bitFlipCooldownProgress = (bitIndex: number, time: Date) =>
   state.bits._[bitIndex].flips.map((flip) =>
-    Math.max(
-      0,
-      Math.min(1, (time.getTime() - flip.getTime()) / bitFlipCooldown())
-    )
+    clamp(0, 1, (time.getTime() - flip.getTime()) / bitFlipCooldown())
   );
 
 const bitMuxCooldownProgress = (
@@ -161,13 +166,11 @@ const bitMuxCooldownProgress = (
   lastClick: Date = state.bits.lastMuxClick
 ) => {
   const nextRefresh = nextBitRefresh(now);
-  return Math.max(
+  return clamp(
     0,
-    Math.min(
-      1,
-      (now.getTime() - lastClick.getTime()) /
-        (nextRefresh.getTime() - lastClick.getTime())
-    )
+    1,
+    (now.getTime() - lastClick.getTime()) /
+      (nextRefresh.getTime() - lastClick.getTime())
   );
 };
 
@@ -182,55 +185,61 @@ const bitFlippable = (bitIndex: number, time: Date) =>
   state.bits._[bitIndex].flips.length < bitParallelFlips();
 
 const bitCost = (n: number = state.bits.purchased) =>
-  Math.round(BASE_VALUES.bitCost * BASE_VALUES.bitCostCostMultiplier ** n);
-
-const parallelProcCost = (n: number = state.parallelProcs.purchased) =>
   Math.round(
-    BASE_VALUES.parallelProcCost *
-      BASE_VALUES.parallelProcCostMultiPerPurchased ** n
+    multiScale(BASE_VALUES.bitCost, BASE_VALUES.bitCostCostMultiplier)(n)
   );
+
+const autoFlipperCost = () => BASE_VALUES.autoFlipperCost;
 
 const bitCooldownUpgradeCost = (
   n: number = state.bits.purchasedUpgrades.cooldownMultiplier
 ) =>
   Math.round(
-    BASE_VALUES.bitCooldownUpgradeCost *
-      BASE_VALUES.bitCooldownUpgradeCostMultiplierPerPurchased ** n
+    multiScale(
+      BASE_VALUES.bitCooldownUpgradeCost,
+      BASE_VALUES.bitCooldownUpgradeCostMultiplierPerPurchased
+    )(n)
   );
 
 const bitAddedInfoUpgradeCost = (
   n: number = state.bits.purchasedUpgrades.addedInformation
 ) =>
   Math.round(
-    BASE_VALUES.bitAddedInfoUpgradeCost *
-      BASE_VALUES.bitAddedInfoUpgradeCostMultiplierPerPurchased ** n
+    multiScale(
+      BASE_VALUES.bitAddedInfoUpgradeCost,
+      BASE_VALUES.bitAddedInfoUpgradeCostMultiplierPerPurchased
+    )(n)
   );
 
 const maxInfoUpgradeCost = (
   n: number = state.information.purchasedUpgrades.maxMultiplier
 ) =>
   Math.round(
-    BASE_VALUES.maxInfoUpgradeCost *
-      BASE_VALUES.maxInfoUpgradeCostMultiplierPerPurchased ** n
+    multiScale(
+      BASE_VALUES.maxInfoUpgradeCost,
+      BASE_VALUES.maxInfoUpgradeCostMultiplierPerPurchased
+    )(n)
   );
 
-const ppCooldownUpgradeCost = (
-  n: number = state.parallelProcs.purchasedUpgrades.cooldownMultiplier
+const autoFlipperCooldownUpgradeCost = (
+  n: number = state.autoFlipper.purchasedUpgrades.cooldownMultiplier
 ) =>
   Math.round(
-    BASE_VALUES.ppCooldownUpgradeCost *
-      BASE_VALUES.ppCooldownUpgradeCostMultiplierPerPurchased ** n
+    multiScale(
+      BASE_VALUES.autoFlipperCooldownUpgradeCost,
+      BASE_VALUES.autoFlipperCooldownUpgradeCostMultiplierPerPurchased
+    )(n)
   );
 
 const bitParallelFlipCost = (
   n: number = state.bits.purchasedUpgrades.parallelFlips
 ) =>
   Math.round(
-    BASE_VALUES.bitParallelFlipCost *
-      BASE_VALUES.parallelProcCostMultiPerPurchased ** n
+    multiScale(
+      BASE_VALUES.bitParallelFlipCost,
+      BASE_VALUES.bitParallelFlipCostMultiPerPurchased
+    )(n)
   );
-
-// const bitMuxCost = () => Math.round(BASE_VALUES.bitMuxCost);
 
 const nextBitRefresh = (time: Date = new Date()) => {
   let nextRefresh: Date | undefined = undefined;
@@ -270,79 +279,28 @@ const buyBit = () =>
         });
         draft.information.current -= bitCost();
         draft.bits.purchased++;
-
-        if (
-          !draft.progress.bitMuxUnlocked &&
-          bits() >= BASE_VALUES.bitMuxUnlockBitCount
-        ) {
-          draft.progress.bitMuxUnlocked = true;
-        }
-
-        if (
-          !draft.progress.bitCooldownUpgradeUnlocked &&
-          bits() >= BASE_VALUES.bitCooldownUpgradeBitsUnlockThreshold
-        ) {
-          draft.progress.bitCooldownUpgradeUnlocked = true;
-        }
-
-        if (
-          !draft.progress.bitAddedInfoUpgradeUnlocked &&
-          bits() >= BASE_VALUES.bitAddedInfoUpgradeBitsUnlockThreshold
-        ) {
-          draft.progress.bitAddedInfoUpgradeUnlocked = true;
-        }
-
-        if (
-          !draft.progress.bitInfoMultiplierUpgradeUnlocked &&
-          bits() >= BASE_VALUES.bitInfoMultiUpgradeBitsUnlockThreshold
-        ) {
-          draft.progress.bitInfoMultiplierUpgradeUnlocked = true;
-        }
-        if (
-          !draft.progress.parallelProcsUnlocked &&
-          bits() >= BASE_VALUES.parallelProcBitsUnlockThreshold
-        ) {
-          draft.progress.parallelProcsUnlocked = true;
-        }
       }
+      bus.emit("buy-bit", { newBitCount: draft.bits._.length });
     })
   );
 
 const flipBit = (bitIndex: number, time: Date = new Date()) =>
   setState(
     produce((draft) => {
-      const nextInfo = Math.min(
-        maxInformation(),
-        information() + bitInfoPerFlip()
-      );
+      const addedInfo = bitInfoPerFlip();
+      const nextInfo = Math.min(maxInformation(), information() + addedInfo);
       if (draft.bits._[bitIndex].flips.length === bitParallelFlips()) {
         draft.bits._[bitIndex].flips.shift();
       }
 
       draft.bits._[bitIndex].flips.push(time);
+      draft.information.current = nextInfo;
 
       if (information() <= maxInformation() && nextInfo > maxInformation()) {
         // TODO: initiate decay
       }
-      draft.information.current = nextInfo;
 
-      if (!draft.progress.moreBitsUnlocked && information() >= bitCost()) {
-        draft.progress.moreBitsUnlocked = true;
-      }
-
-      if (
-        !draft.progress.maxInformationUpgradeUnlocked &&
-        information() >= maxInfoUpgradeCost(0)
-      ) {
-        draft.progress.maxInformationUpgradeUnlocked = true;
-      }
-
-      if (
-        !draft.progress.bitParallelFlipsUnlocked &&
-        information() >= bitParallelFlipCost(0)
-      ) {
-        draft.progress.bitParallelFlipsUnlocked = true;
-      }
+      bus.emit("flip-bit", { infoDelta: addedInfo, newInfo: nextInfo });
     })
   );
 
@@ -350,28 +308,16 @@ const flipBit = (bitIndex: number, time: Date = new Date()) =>
 const clickBit = (bitIndex: number, time: Date = new Date()) =>
   flipBit(bitIndex, time);
 
-// const buyBitMux = () =>
-//   setState(
-//     produce((draft) => {
-//       if (draft.information.current >= bitMuxCost()) {
-//         draft.unlocks.bitMux = true;
-//         draft.information.current -= bitMuxCost();
-//       }
-//     })
-//   );
-
-const buyParallelProc = () =>
+const buyAutoFlipper = () =>
   setState(
     produce((draft) => {
-      if (information() > parallelProcCost()) {
-        draft.information.current -= parallelProcCost();
-        draft.parallelProcs._.push({
-          lastFlip: new Date(0),
-        });
-        draft.parallelProcs.purchased++;
+      if (information() >= autoFlipperCost()) {
+        draft.information.current -= autoFlipperCost();
+        draft.autoFlipper.purchased = true;
+        draft.autoFlipper.enabled = true;
 
-        if (!draft.progress.ppCooldownUpgradeUnlocked) {
-          draft.progress.ppCooldownUpgradeUnlocked = true;
+        if (!draft.progress.autoFlipperCooldownUpgradeUnlocked) {
+          draft.progress.autoFlipperCooldownUpgradeUnlocked = true;
         }
       }
     })
@@ -407,12 +353,12 @@ const buyMaxInfoUpgrade = () =>
     })
   );
 
-const buyPPCooldownUpgrade = () =>
+const buyAutoFlipperCooldownUpgrade = () =>
   setState(
     produce((draft) => {
-      if (information() >= ppCooldownUpgradeCost()) {
-        draft.information.current -= ppCooldownUpgradeCost();
-        draft.parallelProcs.purchasedUpgrades.cooldownMultiplier++;
+      if (information() >= autoFlipperCooldownUpgradeCost()) {
+        draft.information.current -= autoFlipperCooldownUpgradeCost();
+        draft.autoFlipper.purchasedUpgrades.cooldownMultiplier++;
       }
     })
   );
@@ -448,14 +394,11 @@ const flipBitMux = () => {
 const tick = (next: Date) => {
   setState(
     produce((draft) => {
-      const cd = parallelProcCooldown();
-      for (let i = 0; i < parallelProcs(); i++) {
-        const since =
-          next.getTime() - draft.parallelProcs._[i].lastFlip.getTime();
-        if (since >= cd) {
-          if (flipBitMux()) {
-            draft.parallelProcs._[i].lastFlip = next;
-          }
+      const cd = autoFlipperCooldown();
+      const since = next.getTime() - draft.autoFlipper.lastFlip.getTime();
+      if (since >= cd && draft.autoFlipper.enabled) {
+        if (flipBitMux()) {
+          draft.autoFlipper.lastFlip = next;
         }
       }
     })
@@ -465,9 +408,112 @@ const tick = (next: Date) => {
 const currency = (n: number) =>
   displayCurrency(n, state.settings.infoUnitNotation);
 
+function initialize() {
+  bus.subscribe("flip-bit", (_, { unsubscribe }) => {
+    if (information() >= bitCost()) {
+      setState(
+        produce((draft) => {
+          draft.progress.moreBitsUnlocked = true;
+        })
+      );
+      unsubscribe();
+    }
+  });
+
+  bus.subscribe("flip-bit", (_, { unsubscribe }) => {
+    if (information() >= maxInfoUpgradeCost(0)) {
+      setState(
+        produce((draft) => {
+          draft.progress.maxInformationUpgradeUnlocked = true;
+        })
+      );
+      unsubscribe();
+    }
+  });
+
+  bus.subscribe("flip-bit", (_, { unsubscribe }) => {
+    if (information() >= maxInfoUpgradeCost(0)) {
+      setState(
+        produce((draft) => {
+          draft.progress.maxInformationUpgradeUnlocked = true;
+        })
+      );
+      unsubscribe();
+    }
+  });
+
+  bus.subscribe("flip-bit", (_, { unsubscribe }) => {
+    if (information() >= bitParallelFlipCost(0)) {
+      setState(
+        produce((draft) => {
+          draft.progress.bitParallelFlipsUnlocked = true;
+        })
+      );
+      unsubscribe();
+    }
+  });
+
+  bus.subscribe("buy-bit", (_, { unsubscribe }) => {
+    if (bits() >= BASE_VALUES.bitMuxUnlockBitCount) {
+      setState(
+        produce((draft) => {
+          draft.progress.bitMuxUnlocked = true;
+        })
+      );
+      unsubscribe();
+    }
+  });
+
+  bus.subscribe("buy-bit", (_, { unsubscribe }) => {
+    if (bits() >= BASE_VALUES.bitCooldownUpgradeBitsUnlockThreshold) {
+      setState(
+        produce((draft) => {
+          draft.progress.bitCooldownUpgradeUnlocked = true;
+        })
+      );
+      unsubscribe();
+    }
+  });
+
+  bus.subscribe("buy-bit", (_, { unsubscribe }) => {
+    if (bits() >= BASE_VALUES.bitAddedInfoUpgradeBitsUnlockThreshold) {
+      setState(
+        produce((draft) => {
+          draft.progress.bitAddedInfoUpgradeUnlocked = true;
+        })
+      );
+      unsubscribe();
+    }
+  });
+
+  bus.subscribe("buy-bit", (_, { unsubscribe }) => {
+    if (bits() >= BASE_VALUES.bitInfoMultiUpgradeBitsUnlockThreshold) {
+      setState(
+        produce((draft) => {
+          draft.progress.bitInfoMultiplierUpgradeUnlocked = true;
+        })
+      );
+      unsubscribe();
+    }
+  });
+
+  bus.subscribe("buy-bit", (_, { unsubscribe }) => {
+    if (bits() >= BASE_VALUES.autoFlipperBitsUnlockThreshold) {
+      setState(
+        produce((draft) => {
+          draft.progress.autoFlipperUnlocked = true;
+        })
+      );
+      unsubscribe();
+    }
+  });
+}
+
 function App() {
   const [now, setNow] = createSignal(new Date());
   let raf: number;
+
+  onMount(initialize);
 
   const step = () => {
     const nextNow = new Date();
@@ -506,14 +552,6 @@ function App() {
           <Show when={state.progress.moreBitsUnlocked} fallback={null}>
             <button onClick={buyBit} disabled={information() < bitCost()}>
               new bit ({currency(bitCost())})
-            </button>
-          </Show>
-          <Show when={state.progress.parallelProcsUnlocked} fallback={null}>
-            <button
-              onClick={buyParallelProc}
-              disabled={information() < parallelProcCost()}
-            >
-              new auto flipper ({currency(parallelProcCost())})
             </button>
           </Show>
         </div>
@@ -595,20 +633,24 @@ function App() {
               </div>
             </button>
           </Show>
-          <Show when={state.progress.ppCooldownUpgradeUnlocked} fallback={null}>
+          <Show
+            when={state.progress.autoFlipperCooldownUpgradeUnlocked}
+            fallback={null}
+          >
             <button
-              onClick={buyPPCooldownUpgrade}
-              disabled={information() < ppCooldownUpgradeCost()}
+              onClick={buyAutoFlipperCooldownUpgrade}
+              disabled={information() < autoFlipperCooldownUpgradeCost()}
             >
               <div>
-                autoflipper cooldown ({currency(ppCooldownUpgradeCost())})
+                autoflipper cooldown (
+                {currency(autoFlipperCooldownUpgradeCost())})
               </div>
               <div>
-                {displayTime(parallelProcCooldown())}
+                {displayTime(autoFlipperCooldown())}
                 {"->"}
                 {displayTime(
-                  parallelProcCooldown(
-                    state.parallelProcs.purchasedUpgrades.cooldownMultiplier + 1
+                  autoFlipperCooldown(
+                    state.autoFlipper.purchasedUpgrades.cooldownMultiplier + 1
                   )
                 )}
               </div>
@@ -616,6 +658,16 @@ function App() {
           </Show>
         </div>
         <div id="unlocks" />
+        <Show when={state.progress.autoFlipperUnlocked} fallback={null}>
+          <button
+            onClick={buyAutoFlipper}
+            disabled={
+              information() < autoFlipperCost() || autoFlipperPurchased()
+            }
+          >
+            auto flipper ({currency(autoFlipperCost())})
+          </button>
+        </Show>
       </div>
     </>
   );
@@ -631,7 +683,7 @@ function BitGrid(props: { now: Date }) {
             <button
               class="bit"
               style={{
-                "background-color": interpolate(
+                "background-color": cssInterpolate(
                   "#cc3333",
                   "#ffffff",
                   Math.min(...bitFlipCooldownProgress(i(), props.now))
