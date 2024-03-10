@@ -70,26 +70,48 @@ export const displayCurrency = (b: number, notation: UnitNotationOption) => {
   }b`;
 };
 
-export function addedScale(
-  baseCost: number,
-  added: number
-): (a: number) => number {
-  return (a) => baseCost + added * a;
+export type Modifier = (n: number) => ModValue;
+export type ModValue = {
+  value: number;
+  type: ModType;
+};
+
+export type ModType = "additive" | "multiplicative";
+export type ScaleFn = {
+  type: ModType;
+  (n?: number): number;
+};
+
+export function additive(added: number, base: number = 0): ScaleFn {
+  const fn = (n: number = 0) => base + added * n;
+  fn.type = "additive" as const;
+  return fn;
 }
 
-export function multiScale(
-  baseCost: number,
-  multiplier: number
-): (m: number) => number {
-  return (m) => baseCost * multiplier ** m;
+export function multiplicative(multiplier: number, base: number = 1): ScaleFn {
+  const fn = (n: number = 0) => base * multiplier ** n;
+  fn.type = "multiplicative" as const;
+  return fn;
 }
 
-export function doubleScale(
-  baseCost: number,
-  added: number,
-  multiplier: number
-): (a: number, m: number) => number {
-  return (a, m) => (baseCost + added * a) * multiplier ** m;
+export function applyMods(base: number, mods: ScaleFn[]) {
+  let totalAdded = 0;
+  let totalMult = 1;
+  for (let i = 0; i < mods.length; i++) {
+    const mod = mods[i];
+    switch (mod.type) {
+      case "additive": {
+        totalAdded += mod();
+        break;
+      }
+      case "multiplicative": {
+        totalMult *= mod();
+        break;
+      }
+    }
+  }
+
+  return (base + totalAdded) * totalMult;
 }
 
 export function clamp(min: number, max: number, value: number) {

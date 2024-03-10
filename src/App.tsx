@@ -1,169 +1,144 @@
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import "./App.css";
+import { bus } from "./events";
+import { createResource, createStatefulResource } from "./resource";
+import {
+  applyUpgrades,
+  createUpgrade,
+  manualUnlock,
+  unlockOnEvent,
+} from "./upgrade";
 import {
   UnitNotationOption,
-  addedScale,
+  additive,
   clamp,
   cssInterpolate,
   displayCurrency,
   displayTime,
-  doubleScale,
-  multiScale,
+  multiplicative,
 } from "./utils";
-import { bus } from "./events";
 
 const BASE_VALUES = {
-  maxInformation: 256,
-  informationDecayRatePerSecondPerPercentExceeded: 0.01,
-  bitFlipCooldownMS: 1000,
-  informationPerBitFlip: 1,
   bitCost: 8,
   bitCostCostMultiplier: 2,
-  bitMuxCost: 64,
-  bitMuxUnlockBitCount: 4,
 
   bitParallelFlips: 1,
-  bitParallelFlipCost: 64,
-  bitParallelFlipCostMultiPerPurchased: 1.15,
-  bitParallelFlipAddedFlipsPerUpgrade: 1,
 
   autoFlipperCooldownMS: 2000,
   autoFlipperBitsUnlockThreshold: 4,
   autoFlipperCost: 32,
-
-  bitCooldownUpgradeBitsUnlockThreshold: 4,
-  bitCooldownUpgradeCost: 32,
-  bitCooldownUpgradeCostMultiplierPerPurchased: 1.2,
-  bitCooldownMultiPerUpgrade: 1.1,
-
-  bitAddedInfoUpgradeBitsUnlockThreshold: 4,
-  bitAddedInfoUpgradeCost: 32,
-  bitAddedInfoUpgradeCostMultiplierPerPurchased: 1.2,
-  bitAddedInfoPerUpgrade: 1,
-
-  bitInfoMultiUpgradeBitsUnlockThreshold: 64,
-  bitInfoMultiUpgradeCost: 256,
-  bitInfoMultiUpgradeCostMultiplierPerPurchased: 4,
-  bitInfoMultiPerUpgrade: 2,
-
-  maxInfoUpgradeInfoUnlockThreshold: 256,
-  maxInfoUpgradeCost: 128,
-  maxInfoUpgradeCostMultiplierPerPurchased: 1.5,
-  maxInfoMultiPerUpgrade: 1.5,
-
-  autoFlipperCooldownUpgradeCost: 128,
-  autoFlipperCooldownUpgradeCostMultiplierPerPurchased: 1.15,
-  autoFlipperCooldownMultiPerUpgrade: 1.2,
 };
 
+const information = createResource(0, 256);
+const maxInfoUpgrade = createUpgrade({
+  costResource: information,
+  cost: multiplicative(1.5, 128),
+  unlocks: unlockOnEvent(
+    "flip-bit",
+    (cost) =>
+      ({ newInfo }) =>
+        newInfo >= cost(0)
+  ),
+  effect: multiplicative(1.5),
+});
+
+information.applyUpgrade(maxInfoUpgrade);
+
+const bitParallelFlipUpgrade = createUpgrade({
+  costResource: information,
+  cost: multiplicative(1.15, 64),
+  unlocks: unlockOnEvent(
+    "flip-bit",
+    (cost) =>
+      ({ newInfo }) =>
+        newInfo >= cost(0)
+  ),
+  effect: additive(1),
+});
+const bitParallelFlips = () => applyUpgrades(1, [bitParallelFlipUpgrade]);
+
+const bitFlipCooldownUpgrade = createUpgrade({
+  costResource: information,
+  cost: multiplicative(1.2, 32),
+  unlocks: unlockOnEvent(
+    "buy-bit",
+    () =>
+      ({ newBitCount }) =>
+        newBitCount >= 4
+  ),
+  effect: multiplicative(1 / 1.1),
+});
+const bitFlipCooldown = () => applyUpgrades(1000, [bitFlipCooldownUpgrade]);
+
+const autoFlipperCooldownUpgrade = createUpgrade({
+  costResource: information,
+  cost: multiplicative(1.15, 128),
+  unlocks: manualUnlock(),
+  effect: multiplicative(1 / 1.2),
+});
+const autoFlipperCooldown = () =>
+  applyUpgrades(2000, [autoFlipperCooldownUpgrade]);
+
+const bitAddedInfoUpgrade = createUpgrade({
+  costResource: information,
+  cost: multiplicative(1.2, 32),
+  unlocks: unlockOnEvent(
+    "buy-bit",
+    () =>
+      ({ newBitCount }) =>
+        newBitCount >= 4
+  ),
+  effect: additive(1),
+});
+
+const bitInfoPerFlip = () => applyUpgrades(1, [bitAddedInfoUpgrade]);
+
 const [state, setState] = createStore({
-  information: {
-    current: 0,
-    mods: {
-      decayFactor: 1,
-    },
-    timers: {
-      nextDecay: new Date(0),
-    },
-    purchasedUpgrades: {
-      maxMultiplier: 0,
-    },
-  },
-  bits: {
-    purchased: 0,
-    _: [
-      {
-        flips: [new Date(0)],
-      },
-    ],
-    lastMuxClick: new Date(0),
-    purchasedUpgrades: {
-      cooldownMultiplier: 0,
-      addedInformation: 0,
-      informationMulti: 0,
-      parallelFlips: 0,
-    },
-  },
+  // bits: {
+  //   purchased: 0,
+  //   _: [
+  //     {
+  //       flips: [new Date(0)],
+  //     },
+  //   ],
+  //   lastMuxClick: new Date(0),
+  // },
   autoFlipper: {
     purchased: false,
     enabled: false,
     lastFlip: new Date(0),
-    purchasedUpgrades: {
-      cooldownMultiplier: 0,
-    },
-  },
-  unlocks: {
-    bitMux: false,
   },
   progress: {
-    expandedMemoryUnlocked: false,
-    clocksUnlocked: false,
     moreBitsUnlocked: false,
-    bitMuxUnlocked: false,
-    bitParallelFlipsUnlocked: false,
     autoFlipperUnlocked: false,
-    bitCooldownUpgradeUnlocked: false,
-    bitAddedInfoUpgradeUnlocked: false,
-    bitInfoMultiplierUpgradeUnlocked: false,
-    maxInformationUpgradeUnlocked: false,
-    autoFlipperCooldownUpgradeUnlocked: false,
   },
   settings: {
     infoUnitNotation: "Windows" as UnitNotationOption,
   },
 });
 
-const information = () => state.information.current;
-const maxInformation = (
-  n: number = state.information.purchasedUpgrades.maxMultiplier
-) =>
-  multiScale(BASE_VALUES.maxInformation, BASE_VALUES.maxInfoMultiPerUpgrade)(n);
+const [lastMuxClick, setLastMuxClick] = createSignal(new Date(0));
 
-const bits = () => state.bits._.length;
-const bitParallelFlips = (
-  n: number = state.bits.purchasedUpgrades.parallelFlips
-) =>
-  addedScale(
-    BASE_VALUES.bitParallelFlips,
-    BASE_VALUES.bitParallelFlipAddedFlipsPerUpgrade
-  )(n);
+const bits = createStatefulResource(1, Infinity, {
+  uncapped: true,
+  create: () => ({ flips: [new Date(0)] }),
+});
 
-const bitFlipCooldown = (
-  n: number = state.bits.purchasedUpgrades.cooldownMultiplier
-) =>
-  multiScale(
-    BASE_VALUES.bitFlipCooldownMS,
-    1 / BASE_VALUES.bitCooldownMultiPerUpgrade
-  )(n);
+// const bits = () => state.bits._.length;
 
 const autoFlipperPurchased = () => state.autoFlipper.purchased;
-const autoFlipperCooldown = (
-  n: number = state.autoFlipper.purchasedUpgrades.cooldownMultiplier
-) =>
-  multiScale(
-    BASE_VALUES.autoFlipperCooldownMS,
-    1 / BASE_VALUES.autoFlipperCooldownMultiPerUpgrade
-  )(n);
-
-const bitInfoPerFlip = (
-  m: number = state.bits.purchasedUpgrades.addedInformation,
-  n: number = state.bits.purchasedUpgrades.informationMulti
-) =>
-  doubleScale(
-    BASE_VALUES.informationPerBitFlip,
-    BASE_VALUES.bitAddedInfoPerUpgrade,
-    BASE_VALUES.bitInfoMultiPerUpgrade
-  )(m, n);
 
 const bitFlipCooldownProgress = (bitIndex: number, time: Date) =>
-  state.bits._[bitIndex].flips.map((flip) =>
-    clamp(0, 1, (time.getTime() - flip.getTime()) / bitFlipCooldown())
-  );
+  bits
+    .get(bitIndex)
+    .flips.map((flip) =>
+      clamp(0, 1, (time.getTime() - flip.getTime()) / bitFlipCooldown())
+    );
 
 const bitMuxCooldownProgress = (
   now: Date,
-  lastClick: Date = state.bits.lastMuxClick
+  lastClick: Date = lastMuxClick()
 ) => {
   const nextRefresh = nextBitRefresh(now);
   return clamp(
@@ -176,74 +151,27 @@ const bitMuxCooldownProgress = (
 
 const bitAvailableAt = (bitIndex: number) =>
   new Date(
-    Math.min(...state.bits._[bitIndex].flips.map((flip) => flip.getTime())) +
+    Math.min(...bits.get(bitIndex).flips.map((flip) => flip.getTime())) +
       bitFlipCooldown()
   );
 
 const bitFlippable = (bitIndex: number, time: Date) =>
   bitFlipCooldownProgress(bitIndex, time).some((prog) => prog >= 1) ||
-  state.bits._[bitIndex].flips.length < bitParallelFlips();
+  bits.get(bitIndex).flips.length < bitParallelFlipUpgrade.effect();
 
-const bitCost = (n: number = state.bits.purchased) =>
+const bitCost = (n: number = bits.current()) =>
   Math.round(
-    multiScale(BASE_VALUES.bitCost, BASE_VALUES.bitCostCostMultiplier)(n)
+    multiplicative(
+      BASE_VALUES.bitCostCostMultiplier,
+      BASE_VALUES.bitCost
+    )(n - 1)
   );
 
 const autoFlipperCost = () => BASE_VALUES.autoFlipperCost;
 
-const bitCooldownUpgradeCost = (
-  n: number = state.bits.purchasedUpgrades.cooldownMultiplier
-) =>
-  Math.round(
-    multiScale(
-      BASE_VALUES.bitCooldownUpgradeCost,
-      BASE_VALUES.bitCooldownUpgradeCostMultiplierPerPurchased
-    )(n)
-  );
-
-const bitAddedInfoUpgradeCost = (
-  n: number = state.bits.purchasedUpgrades.addedInformation
-) =>
-  Math.round(
-    multiScale(
-      BASE_VALUES.bitAddedInfoUpgradeCost,
-      BASE_VALUES.bitAddedInfoUpgradeCostMultiplierPerPurchased
-    )(n)
-  );
-
-const maxInfoUpgradeCost = (
-  n: number = state.information.purchasedUpgrades.maxMultiplier
-) =>
-  Math.round(
-    multiScale(
-      BASE_VALUES.maxInfoUpgradeCost,
-      BASE_VALUES.maxInfoUpgradeCostMultiplierPerPurchased
-    )(n)
-  );
-
-const autoFlipperCooldownUpgradeCost = (
-  n: number = state.autoFlipper.purchasedUpgrades.cooldownMultiplier
-) =>
-  Math.round(
-    multiScale(
-      BASE_VALUES.autoFlipperCooldownUpgradeCost,
-      BASE_VALUES.autoFlipperCooldownUpgradeCostMultiplierPerPurchased
-    )(n)
-  );
-
-const bitParallelFlipCost = (
-  n: number = state.bits.purchasedUpgrades.parallelFlips
-) =>
-  Math.round(
-    multiScale(
-      BASE_VALUES.bitParallelFlipCost,
-      BASE_VALUES.bitParallelFlipCostMultiPerPurchased
-    )(n)
-  );
-
 const nextBitRefresh = (time: Date = new Date()) => {
   let nextRefresh: Date | undefined = undefined;
-  for (let i = 0; i < state.bits._.length; i++) {
+  for (let i = 0; i < bits.current(); i++) {
     if (bitFlippable(i, time)) {
       return time;
     } else {
@@ -258,7 +186,7 @@ const nextBitRefresh = (time: Date = new Date()) => {
 
 const firstAvailableBit = (time: Date) => {
   // bit mux is available if any bit is available
-  for (let i = 0; i < state.bits._.length; i++) {
+  for (let i = 0; i < bits.current(); i++) {
     if (bitFlippable(i, time)) {
       return i;
     }
@@ -270,40 +198,30 @@ const bitMuxAvailable = (time: Date) => {
   return firstAvailableBit(time) !== -1;
 };
 
-const buyBit = () =>
-  setState(
-    produce((draft) => {
-      if (information() >= bitCost()) {
-        draft.bits._.push({
-          flips: [new Date(0)],
-        });
-        draft.information.current -= bitCost();
-        draft.bits.purchased++;
-      }
-      bus.emit("buy-bit", { newBitCount: draft.bits._.length });
-    })
-  );
+const buyBit = () => {
+  if (information.current() >= bitCost()) {
+    bits.add(1);
+    information.sub(bitCost());
+  }
+  bus.emit("buy-bit", { newBitCount: bits.current() });
+};
 
-const flipBit = (bitIndex: number, time: Date = new Date()) =>
-  setState(
-    produce((draft) => {
-      const addedInfo = bitInfoPerFlip();
-      const nextInfo = Math.min(maxInformation(), information() + addedInfo);
-      if (draft.bits._[bitIndex].flips.length === bitParallelFlips()) {
-        draft.bits._[bitIndex].flips.shift();
-      }
+const flipBit = (bitIndex: number, time: Date = new Date()) => {
+  const addedInfo = bitInfoPerFlip();
+  bits.update(bitIndex, (bit) => {
+    if (bit.flips.length === bitParallelFlips()) {
+      bit.flips.shift();
+    }
 
-      draft.bits._[bitIndex].flips.push(time);
-      draft.information.current = nextInfo;
+    bit.flips.push(time);
+  });
+  information.add(addedInfo);
 
-      if (information() <= maxInformation() && nextInfo > maxInformation()) {
-        // TODO: initiate decay
-      }
-
-      bus.emit("flip-bit", { infoDelta: addedInfo, newInfo: nextInfo });
-    })
-  );
-
+  bus.emit("flip-bit", {
+    infoDelta: addedInfo,
+    newInfo: information.current(),
+  });
+};
 // separated for tracking manual clicks vs. automated flips
 const clickBit = (bitIndex: number, time: Date = new Date()) =>
   flipBit(bitIndex, time);
@@ -311,64 +229,12 @@ const clickBit = (bitIndex: number, time: Date = new Date()) =>
 const buyAutoFlipper = () =>
   setState(
     produce((draft) => {
-      if (information() >= autoFlipperCost()) {
-        draft.information.current -= autoFlipperCost();
+      if (information.current() >= autoFlipperCost()) {
+        information.sub(autoFlipperCost());
         draft.autoFlipper.purchased = true;
         draft.autoFlipper.enabled = true;
 
-        if (!draft.progress.autoFlipperCooldownUpgradeUnlocked) {
-          draft.progress.autoFlipperCooldownUpgradeUnlocked = true;
-        }
-      }
-    })
-  );
-
-const buyBitCooldownUpgrade = () =>
-  setState(
-    produce((draft) => {
-      if (information() >= bitCooldownUpgradeCost()) {
-        draft.information.current -= bitCooldownUpgradeCost();
-        draft.bits.purchasedUpgrades.cooldownMultiplier++;
-      }
-    })
-  );
-
-const buyBitAddedInfoUpgrade = () =>
-  setState(
-    produce((draft) => {
-      if (information() >= bitAddedInfoUpgradeCost()) {
-        draft.information.current -= bitAddedInfoUpgradeCost();
-        draft.bits.purchasedUpgrades.addedInformation++;
-      }
-    })
-  );
-
-const buyMaxInfoUpgrade = () =>
-  setState(
-    produce((draft) => {
-      if (information() >= maxInfoUpgradeCost()) {
-        draft.information.current -= maxInfoUpgradeCost();
-        draft.information.purchasedUpgrades.maxMultiplier++;
-      }
-    })
-  );
-
-const buyAutoFlipperCooldownUpgrade = () =>
-  setState(
-    produce((draft) => {
-      if (information() >= autoFlipperCooldownUpgradeCost()) {
-        draft.information.current -= autoFlipperCooldownUpgradeCost();
-        draft.autoFlipper.purchasedUpgrades.cooldownMultiplier++;
-      }
-    })
-  );
-
-const buyBitParallelFlip = () =>
-  setState(
-    produce((draft) => {
-      if (information() >= bitParallelFlipCost()) {
-        draft.information.current -= bitParallelFlipCost();
-        draft.bits.purchasedUpgrades.parallelFlips++;
+        autoFlipperCooldownUpgrade.unlock();
       }
     })
   );
@@ -382,12 +248,8 @@ const flipBitMux = () => {
     return false;
   }
 
-  setState(
-    produce((draft) => {
-      clickBit(nextBit, now);
-      draft.bits.lastMuxClick = now;
-    })
-  );
+  clickBit(nextBit, now);
+  setLastMuxClick(now);
   return true;
 };
 
@@ -409,8 +271,14 @@ const currency = (n: number) =>
   displayCurrency(n, state.settings.infoUnitNotation);
 
 function initialize() {
+  maxInfoUpgrade.init();
+  bitParallelFlipUpgrade.init();
+  bitFlipCooldownUpgrade.init();
+  bitAddedInfoUpgrade.init();
+
   bus.subscribe("flip-bit", (_, { unsubscribe }) => {
-    if (information() >= bitCost()) {
+    console.log(`info: ${information.current()} - bitCost: ${bitCost()}`);
+    if (information.current() >= bitCost()) {
       setState(
         produce((draft) => {
           draft.progress.moreBitsUnlocked = true;
@@ -420,85 +288,8 @@ function initialize() {
     }
   });
 
-  bus.subscribe("flip-bit", (_, { unsubscribe }) => {
-    if (information() >= maxInfoUpgradeCost(0)) {
-      setState(
-        produce((draft) => {
-          draft.progress.maxInformationUpgradeUnlocked = true;
-        })
-      );
-      unsubscribe();
-    }
-  });
-
-  bus.subscribe("flip-bit", (_, { unsubscribe }) => {
-    if (information() >= maxInfoUpgradeCost(0)) {
-      setState(
-        produce((draft) => {
-          draft.progress.maxInformationUpgradeUnlocked = true;
-        })
-      );
-      unsubscribe();
-    }
-  });
-
-  bus.subscribe("flip-bit", (_, { unsubscribe }) => {
-    if (information() >= bitParallelFlipCost(0)) {
-      setState(
-        produce((draft) => {
-          draft.progress.bitParallelFlipsUnlocked = true;
-        })
-      );
-      unsubscribe();
-    }
-  });
-
   bus.subscribe("buy-bit", (_, { unsubscribe }) => {
-    if (bits() >= BASE_VALUES.bitMuxUnlockBitCount) {
-      setState(
-        produce((draft) => {
-          draft.progress.bitMuxUnlocked = true;
-        })
-      );
-      unsubscribe();
-    }
-  });
-
-  bus.subscribe("buy-bit", (_, { unsubscribe }) => {
-    if (bits() >= BASE_VALUES.bitCooldownUpgradeBitsUnlockThreshold) {
-      setState(
-        produce((draft) => {
-          draft.progress.bitCooldownUpgradeUnlocked = true;
-        })
-      );
-      unsubscribe();
-    }
-  });
-
-  bus.subscribe("buy-bit", (_, { unsubscribe }) => {
-    if (bits() >= BASE_VALUES.bitAddedInfoUpgradeBitsUnlockThreshold) {
-      setState(
-        produce((draft) => {
-          draft.progress.bitAddedInfoUpgradeUnlocked = true;
-        })
-      );
-      unsubscribe();
-    }
-  });
-
-  bus.subscribe("buy-bit", (_, { unsubscribe }) => {
-    if (bits() >= BASE_VALUES.bitInfoMultiUpgradeBitsUnlockThreshold) {
-      setState(
-        produce((draft) => {
-          draft.progress.bitInfoMultiplierUpgradeUnlocked = true;
-        })
-      );
-      unsubscribe();
-    }
-  });
-
-  bus.subscribe("buy-bit", (_, { unsubscribe }) => {
-    if (bits() >= BASE_VALUES.autoFlipperBitsUnlockThreshold) {
+    if (bits.current() >= BASE_VALUES.autoFlipperBitsUnlockThreshold) {
       setState(
         produce((draft) => {
           draft.progress.autoFlipperUnlocked = true;
@@ -545,113 +336,110 @@ function App() {
         <div id="game-state">
           information:
           <span style={{}}>
-            {currency(information())}/{currency(maxInformation())}
+            {currency(information.current())}/{currency(information.max())}
           </span>
         </div>
         <div id="purchases">
           <Show when={state.progress.moreBitsUnlocked} fallback={null}>
-            <button onClick={buyBit} disabled={information() < bitCost()}>
+            <button
+              onClick={buyBit}
+              disabled={information.current() < bitCost()}
+            >
               new bit ({currency(bitCost())})
             </button>
           </Show>
         </div>
         <div id="upgrades">
-          <Show when={state.progress.bitParallelFlipsUnlocked} fallback={null}>
+          <Show when={bitParallelFlipUpgrade.unlocked()} fallback={null}>
             <button
-              onClick={buyBitParallelFlip}
-              disabled={information() < bitParallelFlipCost()}
+              onClick={() => bitParallelFlipUpgrade.buy()}
+              disabled={information.current() < bitParallelFlipUpgrade.cost()}
             >
-              <div>flips per bit ({currency(bitParallelFlipCost())})</div>
+              <div>
+                flips per bit ({currency(bitParallelFlipUpgrade.cost())})
+              </div>
               <div>
                 {bitParallelFlips()}
                 {"->"}
-                {bitParallelFlips(
-                  state.bits.purchasedUpgrades.parallelFlips + 1
-                )}
+                {BASE_VALUES.bitParallelFlips +
+                  bitParallelFlipUpgrade.effect(
+                    bitParallelFlipUpgrade.purchased() + 1
+                  )}
               </div>
             </button>
           </Show>
-          <Show
-            when={state.progress.maxInformationUpgradeUnlocked}
-            fallback={null}
-          >
+          <Show when={maxInfoUpgrade.unlocked()} fallback={null}>
             <button
-              onClick={buyMaxInfoUpgrade}
-              disabled={information() < maxInfoUpgradeCost()}
+              onClick={() => maxInfoUpgrade.buy()}
+              disabled={information.current() < maxInfoUpgrade.cost()}
             >
-              <div>memory increase ({currency(maxInfoUpgradeCost())})</div>
+              <div>memory increase ({currency(maxInfoUpgrade.cost())})</div>
               <div>
-                {currency(maxInformation())}
+                {currency(information.max())}
                 {"->"}
-                {currency(
-                  maxInformation(
-                    state.information.purchasedUpgrades.maxMultiplier + 1
-                  )
-                )}
+                TODO: FIX ME {currency(information.max())}
               </div>
             </button>
           </Show>
-          <Show
-            when={state.progress.bitCooldownUpgradeUnlocked}
-            fallback={null}
-          >
+          <Show when={bitFlipCooldownUpgrade.unlocked()} fallback={null}>
             <button
-              onClick={buyBitCooldownUpgrade}
-              disabled={information() < bitCooldownUpgradeCost()}
+              onClick={() => bitFlipCooldownUpgrade.buy()}
+              disabled={information.current() < bitFlipCooldownUpgrade.cost()}
             >
-              <div>bit cooldown ({currency(bitCooldownUpgradeCost())})</div>
+              <div>
+                bit cooldown ({currency(bitFlipCooldownUpgrade.cost())})
+              </div>
               <div>
                 {displayTime(bitFlipCooldown())}
                 {"->"}
                 {displayTime(
-                  bitFlipCooldown(
-                    state.bits.purchasedUpgrades.cooldownMultiplier + 1
-                  )
+                  1000 *
+                    bitFlipCooldownUpgrade.effect(
+                      bitFlipCooldownUpgrade.purchased() + 1
+                    )
                 )}
               </div>
             </button>
           </Show>
-          <Show
-            when={state.progress.bitAddedInfoUpgradeUnlocked}
-            fallback={null}
-          >
+          <Show when={bitAddedInfoUpgrade.unlocked()} fallback={null}>
             <button
-              onClick={buyBitAddedInfoUpgrade}
-              disabled={information() < bitAddedInfoUpgradeCost()}
+              onClick={() => bitAddedInfoUpgrade.buy()}
+              disabled={information.current() < bitAddedInfoUpgrade.cost()}
             >
               <div>
-                info per bitflip ({currency(bitAddedInfoUpgradeCost())})
+                info per bitflip ({currency(bitAddedInfoUpgrade.cost())})
               </div>
               <div>
                 {currency(bitInfoPerFlip())}
                 {"->"}
                 {currency(
-                  bitInfoPerFlip(
-                    state.bits.purchasedUpgrades.addedInformation + 1
-                  )
+                  1 +
+                    bitAddedInfoUpgrade.effect(
+                      bitAddedInfoUpgrade.purchased() + 1
+                    )
                 )}
               </div>
             </button>
           </Show>
-          <Show
-            when={state.progress.autoFlipperCooldownUpgradeUnlocked}
-            fallback={null}
-          >
+          <Show when={autoFlipperCooldownUpgrade.unlocked()} fallback={null}>
             <button
-              onClick={buyAutoFlipperCooldownUpgrade}
-              disabled={information() < autoFlipperCooldownUpgradeCost()}
+              onClick={() => autoFlipperCooldownUpgrade.buy()}
+              disabled={
+                information.current() < autoFlipperCooldownUpgrade.cost()
+              }
             >
               <div>
                 autoflipper cooldown (
-                {currency(autoFlipperCooldownUpgradeCost())})
+                {currency(autoFlipperCooldownUpgrade.cost())})
               </div>
               <div>
                 {displayTime(autoFlipperCooldown())}
                 {"->"}
                 {displayTime(
-                  autoFlipperCooldown(
-                    state.autoFlipper.purchasedUpgrades.cooldownMultiplier + 1
-                  )
+                  BASE_VALUES.autoFlipperCooldownMS *
+                    autoFlipperCooldownUpgrade.effect(
+                      autoFlipperCooldownUpgrade.purchased() + 1
+                    )
                 )}
               </div>
             </button>
@@ -662,7 +450,8 @@ function App() {
           <button
             onClick={buyAutoFlipper}
             disabled={
-              information() < autoFlipperCost() || autoFlipperPurchased()
+              information.current() < autoFlipperCost() ||
+              autoFlipperPurchased()
             }
           >
             auto flipper ({currency(autoFlipperCost())})
@@ -675,8 +464,8 @@ function App() {
 
 function BitGrid(props: { now: Date }) {
   return (
-    <div class={bits() >= 8 ? "bit-grid-fullrow" : "bit-grid-initial"}>
-      <For each={state.bits._}>
+    <div class={bits.current() >= 8 ? "bit-grid-fullrow" : "bit-grid-initial"}>
+      <For each={bits.all()}>
         {(_bit, i) => {
           const flippable = () => bitFlippable(i(), props.now);
           return (
