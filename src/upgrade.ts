@@ -84,9 +84,19 @@ export function createUpgrade<T extends UnlockType>(
   };
 }
 
-export function applyUpgrades(base: number, upgrades: Upgrade[]) {
-  return applyMods(
-    base,
-    upgrades.map((u) => u.effect)
-  );
+export type UpgradeFn = (deltaPurchased?: number[] | number) => number;
+
+export function applyUpgrades(base: number, upgrades: Upgrade[]): UpgradeFn {
+  return (deltaPurchased: number[] | number = 0) =>
+    applyMods(
+      base,
+      upgrades.map((u, i) => {
+        const d = Array.isArray(deltaPurchased)
+          ? deltaPurchased[i]
+          : deltaPurchased;
+        const fn = () => u.effect(u.purchased() + d);
+        fn.type = u.effect.type;
+        return fn;
+      })
+    );
 }

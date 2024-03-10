@@ -1,5 +1,6 @@
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { createStore, produce } from "solid-js/store";
+import colors from "tailwindcss/colors";
 import "./App.css";
 import { bus } from "./events";
 import { createResource, createStatefulResource } from "./resource";
@@ -18,6 +19,7 @@ import {
   displayTime,
   multiplicative,
 } from "./utils";
+import { Button } from "./Button";
 
 const BASE_VALUES = {
   bitCost: 8,
@@ -56,7 +58,7 @@ const bitParallelFlipUpgrade = createUpgrade({
   ),
   effect: additive(1),
 });
-const bitParallelFlips = () => applyUpgrades(1, [bitParallelFlipUpgrade]);
+const bitParallelFlips = applyUpgrades(1, [bitParallelFlipUpgrade]);
 
 const bitFlipCooldownUpgrade = createUpgrade({
   costResource: information,
@@ -69,7 +71,7 @@ const bitFlipCooldownUpgrade = createUpgrade({
   ),
   effect: multiplicative(1 / 1.1),
 });
-const bitFlipCooldown = () => applyUpgrades(1000, [bitFlipCooldownUpgrade]);
+const bitFlipCooldown = applyUpgrades(1000, [bitFlipCooldownUpgrade]);
 
 const autoFlipperCooldownUpgrade = createUpgrade({
   costResource: information,
@@ -77,10 +79,17 @@ const autoFlipperCooldownUpgrade = createUpgrade({
   unlocks: manualUnlock(),
   effect: multiplicative(1 / 1.2),
 });
-const autoFlipperCooldown = () =>
-  applyUpgrades(2000, [autoFlipperCooldownUpgrade]);
+const autoFlipperCooldown = applyUpgrades(2000, [autoFlipperCooldownUpgrade]);
 
-const bitAddedInfoUpgrade = createUpgrade({
+const bitsFlippedUpgrade = createUpgrade({
+  costResource: information,
+  cost: multiplicative(1.15, 64),
+  unlocks: unlockOnEvent("buy-autoflipper", () => () => true),
+  effect: additive(1),
+});
+const bitsFlipped = applyUpgrades(1, [bitsFlippedUpgrade]);
+
+const bitFlipAddedInfoUpgrade = createUpgrade({
   costResource: information,
   cost: multiplicative(1.2, 32),
   unlocks: unlockOnEvent(
@@ -92,18 +101,9 @@ const bitAddedInfoUpgrade = createUpgrade({
   effect: additive(1),
 });
 
-const bitInfoPerFlip = () => applyUpgrades(1, [bitAddedInfoUpgrade]);
+const bitInfoPerFlip = applyUpgrades(1, [bitFlipAddedInfoUpgrade]);
 
 const [state, setState] = createStore({
-  // bits: {
-  //   purchased: 0,
-  //   _: [
-  //     {
-  //       flips: [new Date(0)],
-  //     },
-  //   ],
-  //   lastMuxClick: new Date(0),
-  // },
   autoFlipper: {
     purchased: false,
     enabled: false,
@@ -124,8 +124,6 @@ const bits = createStatefulResource(1, Infinity, {
   uncapped: true,
   create: () => ({ flips: [new Date(0)] }),
 });
-
-// const bits = () => state.bits._.length;
 
 const autoFlipperPurchased = () => state.autoFlipper.purchased;
 
@@ -226,7 +224,7 @@ const flipBit = (bitIndex: number, time: Date = new Date()) => {
 const clickBit = (bitIndex: number, time: Date = new Date()) =>
   flipBit(bitIndex, time);
 
-const buyAutoFlipper = () =>
+const buyAutoFlipper = () => {
   setState(
     produce((draft) => {
       if (information.current() >= autoFlipperCost()) {
@@ -238,17 +236,21 @@ const buyAutoFlipper = () =>
       }
     })
   );
+  bus.emit("buy-autoflipper", {});
+};
 
 const flipBitMux = () => {
   const now = new Date();
-  // find any available bit and flip it
-  const nextBit = firstAvailableBit(now);
+  for (let i = 0; i < bitsFlipped(); i++) {
+    // find any available bit and flip it
+    const nextBit = firstAvailableBit(now);
 
-  if (nextBit === -1) {
-    return false;
+    if (nextBit === -1) {
+      return false;
+    }
+
+    clickBit(nextBit, now);
   }
-
-  clickBit(nextBit, now);
   setLastMuxClick(now);
   return true;
 };
@@ -274,10 +276,10 @@ function initialize() {
   maxInfoUpgrade.init();
   bitParallelFlipUpgrade.init();
   bitFlipCooldownUpgrade.init();
-  bitAddedInfoUpgrade.init();
+  bitsFlippedUpgrade.init();
+  bitFlipAddedInfoUpgrade.init();
 
   bus.subscribe("flip-bit", (_, { unsubscribe }) => {
-    console.log(`info: ${information.current()} - bitCost: ${bitCost()}`);
     if (information.current() >= bitCost()) {
       setState(
         produce((draft) => {
@@ -319,39 +321,44 @@ function App() {
 
   return (
     <>
-      <div class="card">
-        <div>Current time: {now().toISOString()}</div>
-        <button
-          onClick={flipBitMux}
-          disabled={!bitMuxAvailable(now())}
-          class="bit-mux"
-        >
-          flip bit
-          <div
-            class="progress"
-            style={{ width: `${(1 - bitMuxCooldownProgress(now())) * 100}%` }}
-          />
-        </button>
-        <BitGrid now={now()} />
-        <div id="game-state">
-          information:
-          <span style={{}}>
-            {currency(information.current())}/{currency(information.max())}
-          </span>
+      <div class="container mx-auto my-8">
+        <div class="flex flex-row">
+          <Button
+            onClick={flipBitMux}
+            disabled={!bitMuxAvailable(now())}
+            class="bit-mux overflow-hidden"
+          >
+            flip bit
+            <div
+              class="progress opacity-50"
+              style={{
+                width: `${(1 - bitMuxCooldownProgress(now())) * 100}%`,
+              }}
+            />
+          </Button>
+          <div class="grow">
+            <BitGrid now={now()} />
+          </div>
+          <div id="game-state">
+            information:
+            <span style={{}}>
+              {currency(information.current())}/{currency(information.max())}
+            </span>
+          </div>
         </div>
-        <div id="purchases">
+        <div id="purchases" class="">
           <Show when={state.progress.moreBitsUnlocked} fallback={null}>
-            <button
+            <Button
               onClick={buyBit}
               disabled={information.current() < bitCost()}
             >
               new bit ({currency(bitCost())})
-            </button>
+            </Button>
           </Show>
         </div>
-        <div id="upgrades">
+        <div id="upgrades" class="">
           <Show when={bitParallelFlipUpgrade.unlocked()} fallback={null}>
-            <button
+            <Button
               onClick={() => bitParallelFlipUpgrade.buy()}
               disabled={information.current() < bitParallelFlipUpgrade.cost()}
             >
@@ -361,15 +368,12 @@ function App() {
               <div>
                 {bitParallelFlips()}
                 {"->"}
-                {BASE_VALUES.bitParallelFlips +
-                  bitParallelFlipUpgrade.effect(
-                    bitParallelFlipUpgrade.purchased() + 1
-                  )}
+                {bitParallelFlips(1)}
               </div>
-            </button>
+            </Button>
           </Show>
           <Show when={maxInfoUpgrade.unlocked()} fallback={null}>
-            <button
+            <Button
               onClick={() => maxInfoUpgrade.buy()}
               disabled={information.current() < maxInfoUpgrade.cost()}
             >
@@ -377,12 +381,12 @@ function App() {
               <div>
                 {currency(information.max())}
                 {"->"}
-                TODO: FIX ME {currency(information.max())}
+                {currency(information.max(1))}
               </div>
-            </button>
+            </Button>
           </Show>
           <Show when={bitFlipCooldownUpgrade.unlocked()} fallback={null}>
-            <button
+            <Button
               onClick={() => bitFlipCooldownUpgrade.buy()}
               disabled={information.current() < bitFlipCooldownUpgrade.cost()}
             >
@@ -392,37 +396,40 @@ function App() {
               <div>
                 {displayTime(bitFlipCooldown())}
                 {"->"}
-                {displayTime(
-                  1000 *
-                    bitFlipCooldownUpgrade.effect(
-                      bitFlipCooldownUpgrade.purchased() + 1
-                    )
-                )}
+                {displayTime(bitFlipCooldown(1))}
               </div>
-            </button>
+            </Button>
           </Show>
-          <Show when={bitAddedInfoUpgrade.unlocked()} fallback={null}>
-            <button
-              onClick={() => bitAddedInfoUpgrade.buy()}
-              disabled={information.current() < bitAddedInfoUpgrade.cost()}
+          <Show when={bitFlipAddedInfoUpgrade.unlocked()} fallback={null}>
+            <Button
+              onClick={() => bitFlipAddedInfoUpgrade.buy()}
+              disabled={information.current() < bitFlipAddedInfoUpgrade.cost()}
             >
               <div>
-                info per bitflip ({currency(bitAddedInfoUpgrade.cost())})
+                info per bitflip ({currency(bitFlipAddedInfoUpgrade.cost())})
               </div>
               <div>
                 {currency(bitInfoPerFlip())}
                 {"->"}
-                {currency(
-                  1 +
-                    bitAddedInfoUpgrade.effect(
-                      bitAddedInfoUpgrade.purchased() + 1
-                    )
-                )}
+                {currency(bitInfoPerFlip(1))}
               </div>
-            </button>
+            </Button>
+          </Show>
+          <Show when={bitsFlippedUpgrade.unlocked()} fallback={null}>
+            <Button
+              onClick={() => bitsFlippedUpgrade.buy()}
+              disabled={information.current() < bitsFlippedUpgrade.cost()}
+            >
+              <div>bits flipped ({currency(bitsFlippedUpgrade.cost())})</div>
+              <div>
+                {bitsFlipped()}
+                {"->"}
+                {bitsFlipped(1)}
+              </div>
+            </Button>
           </Show>
           <Show when={autoFlipperCooldownUpgrade.unlocked()} fallback={null}>
-            <button
+            <Button
               onClick={() => autoFlipperCooldownUpgrade.buy()}
               disabled={
                 information.current() < autoFlipperCooldownUpgrade.cost()
@@ -435,19 +442,14 @@ function App() {
               <div>
                 {displayTime(autoFlipperCooldown())}
                 {"->"}
-                {displayTime(
-                  BASE_VALUES.autoFlipperCooldownMS *
-                    autoFlipperCooldownUpgrade.effect(
-                      autoFlipperCooldownUpgrade.purchased() + 1
-                    )
-                )}
+                {displayTime(autoFlipperCooldown(1))}
               </div>
-            </button>
+            </Button>
           </Show>
         </div>
         <div id="unlocks" />
         <Show when={state.progress.autoFlipperUnlocked} fallback={null}>
-          <button
+          <Button
             onClick={buyAutoFlipper}
             disabled={
               information.current() < autoFlipperCost() ||
@@ -455,7 +457,7 @@ function App() {
             }
           >
             auto flipper ({currency(autoFlipperCost())})
-          </button>
+          </Button>
         </Show>
       </div>
     </>
@@ -470,11 +472,11 @@ function BitGrid(props: { now: Date }) {
           const flippable = () => bitFlippable(i(), props.now);
           return (
             <button
-              class="bit"
+              class="aspect-square w-12 bg-gray-950 border border-gray-700"
               style={{
                 "background-color": cssInterpolate(
-                  "#cc3333",
-                  "#ffffff",
+                  colors.red[500],
+                  colors.gray[950],
                   Math.min(...bitFlipCooldownProgress(i(), props.now))
                 ),
               }}

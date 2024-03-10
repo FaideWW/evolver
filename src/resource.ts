@@ -1,14 +1,14 @@
 import { createSignal, Accessor, batch } from "solid-js";
 import { createStore, produce } from "solid-js/store";
-import { ScaleFn, applyMods } from "./utils";
-import { Upgrade } from "./upgrade";
+import { ScaleFn } from "./utils";
+import { Upgrade, UpgradeFn, applyUpgrades } from "./upgrade";
 
 export interface Resource {
   costResource?: Resource;
   cost?: ScaleFn;
   current: Accessor<number>;
   baseMax: Accessor<number>;
-  max: Accessor<number>;
+  max: UpgradeFn;
   add: (n: number) => number;
   sub: (n: number) => number;
   set: (n: number) => number;
@@ -43,11 +43,7 @@ export function createResource(
   );
   const [baseMax, setBaseMax] = createSignal(maxValue);
   const [upgrades, setUpgrades] = createSignal<Upgrade[]>([]);
-  const moddedMax = () =>
-    applyMods(
-      baseMax(),
-      upgrades().map((u) => u.effect)
-    );
+  const moddedMax: UpgradeFn = (n) => applyUpgrades(baseMax(), upgrades())(n);
 
   return {
     current,

@@ -12,6 +12,7 @@ export interface BuyBitEvent {
 export interface Events {
   "flip-bit": FlipBitEvent;
   "buy-bit": BuyBitEvent;
+  "buy-autoflipper": Record<string, never>;
 }
 
 export type EventType = keyof Events;
@@ -55,10 +56,7 @@ class EventBus {
 
     listeners[listenerId] = { id: listenerId, listener: fn, opts };
 
-    console.log("registering listener", listenerId);
-
     const cleanup = () => {
-      console.log("cleaning up listener", listenerId);
       delete this.listeners[type]?.[listenerId];
     };
     onCleanup(cleanup);
