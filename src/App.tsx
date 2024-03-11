@@ -1,7 +1,17 @@
-import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
+import {
+  For,
+  Index,
+  Show,
+  createEffect,
+  createSignal,
+  onCleanup,
+  onMount,
+} from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import colors from "tailwindcss/colors";
+import { Button } from "./Button";
 import { bus } from "./events";
+import { data, maxDataUpgrade } from "./data";
 import { createResource, createStatefulResource } from "./resource";
 import {
   applyUpgrades,
@@ -20,23 +30,13 @@ import {
   displayTime,
   multiplicative,
 } from "./utils";
-import { Button } from "./Button";
+import { disableProcess, enableProcess, runningProcs } from "./memory";
 
 const BASE_VALUES = {
   autoFlipperCooldownMS: 2000,
   autoFlipperBitsUnlockThreshold: 4,
   autoFlipperCost: 32,
 };
-
-const information = createResource(0, 256);
-const maxInfoUpgrade = createUpgrade({
-  costResource: information,
-  cost: multiplicative(1.5, 128),
-  unlocks: unlockOnResourceThreshold(information, (cost) => cost(0)),
-  effect: multiplicative(1.5),
-});
-
-information.applyUpgrade(maxInfoUpgrade);
 
 const bits = createStatefulResource(1, Infinity, {
   uncapped: true,
@@ -48,8 +48,8 @@ const bitCost = (p = bits.current(), c = 1) =>
   multiplicative(2, 8)(p - 1 + c - 1);
 const buyBit = (n: number = 1) => {
   const cost = bitCost(bits.current() - 1 + (n - 1));
-  if (information.current() >= cost) {
-    information.sub(cost);
+  if (data.current() >= cost) {
+    data.sub(cost);
     bits.add(n);
     bus.emit("buy-bit", { newBitCount: bits.current() });
   }
@@ -57,23 +57,23 @@ const buyBit = (n: number = 1) => {
 
 const memory = createResource(0, 0);
 const maxMemoryUpgrade = createUpgrade({
-  costResource: information,
+  costResource: data,
   cost: multiplicative(2, 1 * KB),
-  unlocks: unlockOnResourceThreshold(information, (cost) => cost(0)),
+  unlocks: unlockOnResourceThreshold(data, (cost) => cost(0)),
   effect: additive(1),
 });
 memory.applyUpgrade(maxMemoryUpgrade);
 
 const bitParallelFlipUpgrade = createUpgrade({
-  costResource: information,
+  costResource: data,
   cost: multiplicative(1.15, 64),
-  unlocks: unlockOnResourceThreshold(information, (cost) => cost(0)),
+  unlocks: unlockOnResourceThreshold(data, (cost) => cost(0)),
   effect: additive(1),
 });
 const bitParallelFlips = applyUpgrades(1, [bitParallelFlipUpgrade]);
 
 const bitFlipCooldownUpgrade = createUpgrade({
-  costResource: information,
+  costResource: data,
   cost: multiplicative(1.2, 32),
   unlocks: unlockOnResourceThreshold(bits, 4),
   effect: multiplicative(1 / 1.1),
@@ -81,7 +81,7 @@ const bitFlipCooldownUpgrade = createUpgrade({
 const bitFlipCooldown = applyUpgrades(1000, [bitFlipCooldownUpgrade]);
 
 const autoFlipperCooldownUpgrade = createUpgrade({
-  costResource: information,
+  costResource: data,
   cost: multiplicative(1.15, 128),
   unlocks: manualUnlock(),
   effect: multiplicative(1 / 1.2),
@@ -89,7 +89,7 @@ const autoFlipperCooldownUpgrade = createUpgrade({
 const autoFlipperCooldown = applyUpgrades(2000, [autoFlipperCooldownUpgrade]);
 
 const bitsFlippedUpgrade = createUpgrade({
-  costResource: information,
+  costResource: data,
   cost: multiplicative(1.15, 64),
   unlocks: unlockOnEvent("buy-autoflipper", () => () => true),
   effect: additive(1),
@@ -97,7 +97,7 @@ const bitsFlippedUpgrade = createUpgrade({
 const bitsFlipped = applyUpgrades(1, [bitsFlippedUpgrade]);
 
 const bitFlipAddedInfoUpgrade = createUpgrade({
-  costResource: information,
+  costResource: data,
   cost: multiplicative(1.2, 32),
   unlocks: unlockOnResourceThreshold(bits, 4),
   effect: additive(1),
@@ -193,11 +193,11 @@ const flipBit = (bitIndex: number, time: Date = new Date()) => {
 
     bit.flips.push(time);
   });
-  information.add(addedInfo);
+  data.add(addedInfo);
 
   bus.emit("flip-bit", {
     infoDelta: addedInfo,
-    newInfo: information.current(),
+    newInfo: data.current(),
   });
 };
 // separated for tracking manual clicks vs. automated flips
@@ -207,8 +207,8 @@ const clickBit = (bitIndex: number, time: Date = new Date()) =>
 const buyAutoFlipper = () => {
   setState(
     produce((draft) => {
-      if (information.current() >= autoFlipperCost()) {
-        information.sub(autoFlipperCost());
+      if (data.current() >= autoFlipperCost()) {
+        data.sub(autoFlipperCost());
         draft.autoFlipper.purchased = true;
         draft.autoFlipper.enabled = true;
 
@@ -252,8 +252,11 @@ const tick = (next: Date) => {
 const currency = (n: number) =>
   displayCurrency(n, state.settings.infoUnitNotation);
 
+const [testProcId, setTestProcId] = createSignal(-1);
+
 function initialize() {
-  maxInfoUpgrade.init();
+  maxDataUpgrade.init();
+  maxMemoryUpgrade.init();
   bitParallelFlipUpgrade.init();
   bitFlipCooldownUpgrade.init();
   bitsFlippedUpgrade.init();
@@ -269,6 +272,27 @@ function initialize() {
       unsubscribe();
     }
   });
+
+  setTestProcId(
+    enableProcess({
+      type: "",
+      name: "Test process",
+      tickFn: () => {},
+      memoryCost: 0.5,
+    })
+  );
+}
+
+function cleanup() {
+  // maxDataUpgrade.cleanup();
+  // maxMemoryUpgrade.cleanup();
+  // bitParallelFlipUpgrade.cleanup();
+  // bitFlipCooldownUpgrade.cleanup();
+  // bitsFlippedUpgrade.cleanup();
+  // bitFlipAddedInfoUpgrade.cleanup();
+
+  disableProcess(testProcId());
+  setTestProcId(-1);
 }
 
 function App() {
@@ -276,6 +300,7 @@ function App() {
   let raf: number;
 
   onMount(initialize);
+  onCleanup(cleanup);
 
   const step = () => {
     const nextNow = new Date();
@@ -307,14 +332,14 @@ function App() {
           </Button>
           <div class="grow flex flex-col justify-center">
             <BitGrid now={now()} />
-            <Show when={memory.current() > 0}>
+            <Show when={memory.max() > 0}>
               <MemoryStack />
             </Show>
           </div>
           <div id="game-state">
-            information:
+            data:
             <span style={{}}>
-              {currency(information.current())}/{currency(information.max())}
+              {currency(data.current())}/{currency(data.max())}
             </span>
           </div>
         </div>
@@ -332,17 +357,24 @@ function App() {
         <h3 class="text-xl bold">Cheats</h3>
         <Button
           onClick={() => {
-            information.set(information.max());
+            data.set(data.max());
           }}
         >
-          max information ({currency(information.max())})
+          max data ({currency(data.max())})
         </Button>
         <Button
           onClick={() => {
-            maxInfoUpgrade.buy(4, true);
+            bits.add(bits.current() < 8 ? 7 : 8);
           }}
         >
-          up max info ({currency(information.max(4))})
+          add row of bits
+        </Button>
+        <Button
+          onClick={() => {
+            maxDataUpgrade.buy(4, true);
+          }}
+        >
+          up max info ({currency(data.max(4))})
         </Button>
       </div>
     </>
@@ -378,25 +410,54 @@ function BitGrid(props: { now: Date }) {
 }
 
 function MemoryStack() {
+  const memorySlots = () => new Array(memory.max() + 1);
   return (
-    <div
-      class="w-40 bg-gray-300"
-      style={{ height: `${20 * memory.current()}px` }}
-    >
-      memory
+    <div>
+      <h3 class="text-xl">Memory</h3>
+      <div class="flex flex-row items-center gap-2">
+        <div
+          class="w-40 bg-gray-600 flex flex-col-reverse"
+          style={{ height: `${40 * memory.max()}px` }}
+        >
+          <For each={runningProcs()}>
+            {(proc) => (
+              <div
+                class="bg-slate-400"
+                style={{ height: `${40 * proc.memoryCost}px` }}
+              >
+                <div class="text-xs">{proc.name}</div>
+              </div>
+            )}
+          </For>
+        </div>
+        <div class="flex flex-col-reverse">
+          <Index each={memorySlots()}>
+            {(_, index) => <div class="h-10 leading-10">{index}</div>}
+          </Index>
+        </div>
+      </div>
     </div>
   );
 }
 
 function Purchases() {
+  createEffect(() => {
+    console.log(maxMemoryUpgrade.cost(0));
+    console.log(maxMemoryUpgrade.unlocked());
+  });
   return (
     <>
-      <Show when={information.current() >= bitCost() || bits.current() > 1}>
-        <Button
-          onClick={() => buyBit()}
-          disabled={information.current() < bitCost()}
-        >
+      <Show when={data.current() >= bitCost() || bits.current() > 1}>
+        <Button onClick={() => buyBit()} disabled={data.current() < bitCost()}>
           new bit ({currency(bitCost())})
+        </Button>
+      </Show>
+      <Show when={maxMemoryUpgrade.unlocked()}>
+        <Button
+          onClick={() => maxMemoryUpgrade.buy()}
+          disabled={data.current() < maxMemoryUpgrade.cost()}
+        >
+          increase memory ({currency(maxMemoryUpgrade.cost())})
         </Button>
       </Show>
     </>
@@ -409,7 +470,7 @@ function Upgrades() {
       <Show when={bitParallelFlipUpgrade.unlocked()}>
         <Button
           onClick={() => bitParallelFlipUpgrade.buy()}
-          disabled={information.current() < bitParallelFlipUpgrade.cost()}
+          disabled={data.current() < bitParallelFlipUpgrade.cost()}
         >
           <div>flips per bit ({currency(bitParallelFlipUpgrade.cost())})</div>
           <div>
@@ -419,23 +480,23 @@ function Upgrades() {
           </div>
         </Button>
       </Show>
-      <Show when={maxInfoUpgrade.unlocked()}>
+      <Show when={maxDataUpgrade.unlocked()}>
         <Button
-          onClick={() => maxInfoUpgrade.buy()}
-          disabled={information.current() < maxInfoUpgrade.cost()}
+          onClick={() => maxDataUpgrade.buy()}
+          disabled={data.current() < maxDataUpgrade.cost()}
         >
-          <div>memory increase ({currency(maxInfoUpgrade.cost())})</div>
+          <div>max info increase ({currency(maxDataUpgrade.cost())})</div>
           <div>
-            {currency(information.max())}
+            {currency(data.max())}
             {"->"}
-            {currency(information.max(1))}
+            {currency(data.max(1))}
           </div>
         </Button>
       </Show>
       <Show when={bitFlipCooldownUpgrade.unlocked()}>
         <Button
           onClick={() => bitFlipCooldownUpgrade.buy()}
-          disabled={information.current() < bitFlipCooldownUpgrade.cost()}
+          disabled={data.current() < bitFlipCooldownUpgrade.cost()}
         >
           <div>bit cooldown ({currency(bitFlipCooldownUpgrade.cost())})</div>
           <div>
@@ -448,7 +509,7 @@ function Upgrades() {
       <Show when={bitFlipAddedInfoUpgrade.unlocked()}>
         <Button
           onClick={() => bitFlipAddedInfoUpgrade.buy()}
-          disabled={information.current() < bitFlipAddedInfoUpgrade.cost()}
+          disabled={data.current() < bitFlipAddedInfoUpgrade.cost()}
         >
           <div>
             info per bitflip ({currency(bitFlipAddedInfoUpgrade.cost())})
@@ -463,7 +524,7 @@ function Upgrades() {
       <Show when={bitsFlippedUpgrade.unlocked()}>
         <Button
           onClick={() => bitsFlippedUpgrade.buy()}
-          disabled={information.current() < bitsFlippedUpgrade.cost()}
+          disabled={data.current() < bitsFlippedUpgrade.cost()}
         >
           <div>bits flipped ({currency(bitsFlippedUpgrade.cost())})</div>
           <div>
@@ -476,7 +537,7 @@ function Upgrades() {
       <Show when={autoFlipperCooldownUpgrade.unlocked()}>
         <Button
           onClick={() => autoFlipperCooldownUpgrade.buy()}
-          disabled={information.current() < autoFlipperCooldownUpgrade.cost()}
+          disabled={data.current() < autoFlipperCooldownUpgrade.cost()}
         >
           <div>
             autoflipper cooldown ({currency(autoFlipperCooldownUpgrade.cost())})
@@ -499,7 +560,7 @@ function Unlocks() {
         <Button
           onClick={buyAutoFlipper}
           disabled={
-            information.current() < autoFlipperCost() || autoFlipperPurchased()
+            data.current() < autoFlipperCost() || autoFlipperPurchased()
           }
         >
           auto flipper ({currency(autoFlipperCost())})

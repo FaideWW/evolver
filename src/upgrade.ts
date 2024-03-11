@@ -49,6 +49,7 @@ export function unlockOnResourceThreshold(
       createEffect(() => {
         const value =
           typeof threshold === "function" ? threshold(costFn) : threshold;
+        console.log(`resource: ${resource.current()} - threshold ${value}`);
         if (resource.current() >= value) {
           onUnlock();
         }
@@ -66,6 +67,8 @@ export interface UpgradeConfig<T extends UnlockType> {
 
 export interface Upgrade {
   init: () => void;
+  // TODO: implement this (move cleanup related stuff to here)
+  cleanup: () => void;
   unlocked: () => boolean;
   unlock: () => void;
   cost: (p?: number, c?: number) => number;
@@ -105,6 +108,7 @@ export function createUpgrade<T extends UnlockType>(
           break;
       }
     },
+    cleanup: () => {},
     purchased,
     unlocked,
     unlock: () => unlocked() === false && setUnlocked(true),
