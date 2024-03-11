@@ -1,11 +1,8 @@
 import { createSignal, Accessor, batch } from "solid-js";
 import { createStore, produce } from "solid-js/store";
-import { ScaleFn } from "./utils";
 import { Upgrade, UpgradeFn, applyUpgrades } from "./upgrade";
 
 export interface Resource {
-  costResource?: Resource;
-  cost?: ScaleFn;
   current: Accessor<number>;
   baseMax: Accessor<number>;
   max: UpgradeFn;
@@ -19,8 +16,6 @@ export interface Resource {
 export interface ResourceConfig {
   uncapped?: boolean;
   unfloored?: boolean;
-  costResource?: Resource;
-  cost?: ScaleFn;
 }
 
 export interface StatefulResource<T> extends Resource {

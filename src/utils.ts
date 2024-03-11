@@ -117,3 +117,7 @@ export function applyMods(base: number, mods: ScaleFn[]) {
 export function clamp(min: number, max: number, value: number) {
   return Math.max(min, Math.min(max, value));
 }
+
+export const KB = 1024;
+export const MB = 1024 * 1024;
+export const GB = 1024 * 1024 * 1024;

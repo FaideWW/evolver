@@ -1,13 +1,14 @@
-import { Accessor, createSignal } from "solid-js";
+import { Accessor, createEffect, createSignal } from "solid-js";
 import { ScaleFn } from "./utils";
 import { EventType, Events, bus } from "./events";
 import { Resource } from "./resource";
 import { applyMods } from "./utils";
 
-export type UnlockType = "on-event" | "manual";
+export type UnlockType = "on-event" | "resource-threshold" | "manual";
 
 export interface UnlockFunctions {
   "on-event": (costFn: ScaleFn, onUnlock: () => void) => void;
+  "resource-threshold": (costFn: ScaleFn, onUnlock: () => void) => void;
   manual: () => void;
 }
 
@@ -36,6 +37,24 @@ export function unlockOnEvent<T extends EventType>(
 
 export function manualUnlock(): UnlockCondition<"manual"> {
   return { type: "manual", fn: () => {} };
+}
+
+export function unlockOnResourceThreshold(
+  resource: Resource,
+  threshold: number | ((cost: (n: number) => number) => number)
+): UnlockCondition<"resource-threshold"> {
+  return {
+    type: "resource-threshold",
+    fn: (costFn, onUnlock) => {
+      createEffect(() => {
+        const value =
+          typeof threshold === "function" ? threshold(costFn) : threshold;
+        if (resource.current() >= value) {
+          onUnlock();
+        }
+      });
+    },
+  };
 }
 
 export interface UpgradeConfig<T extends UnlockType> {
@@ -68,10 +87,24 @@ export function createUpgrade<T extends UnlockType>(
   return {
     cost: costFn,
     effect: effectWithPurchased,
-    init: () =>
-      unlocks.type === "on-event"
-        ? unlocks.fn(cost, () => setUnlocked(true))
-        : null,
+    init: () => {
+      switch (unlocks.type) {
+        case "on-event":
+          {
+            (unlocks as UnlockCondition<"on-event">).fn(cost, () =>
+              setUnlocked(true)
+            );
+          }
+          break;
+        case "resource-threshold":
+          {
+            (unlocks as UnlockCondition<"resource-threshold">).fn(cost, () =>
+              setUnlocked(true)
+            );
+          }
+          break;
+      }
+    },
     purchased,
     unlocked,
     unlock: () => unlocked() === false && setUnlocked(true),
