@@ -328,14 +328,30 @@ function App() {
           <Unlocks />
         </div>
       </div>
-      <div id="cheat-menu"></div>
+      <div id="cheat-menu" class="absolute bottom-4 right-4">
+        <h3 class="text-xl bold">Cheats</h3>
+        <Button
+          onClick={() => {
+            information.set(information.max());
+          }}
+        >
+          max information ({currency(information.max())})
+        </Button>
+        <Button
+          onClick={() => {
+            maxInfoUpgrade.buy(4, true);
+          }}
+        >
+          up max info ({currency(information.max(4))})
+        </Button>
+      </div>
     </>
   );
 }
 
 function BitGrid(props: { now: Date }) {
-  const partialGrid = "flex flex-row justify-center gap-0.5";
-  const fullGrid = "grid grid-cols-8 gap-0.5 place-content-center";
+  const partialGrid = "flex flex-row justify-center";
+  const fullGrid = "inline-grid w-96 mx-auto grid-cols-8 place-content-center";
   return (
     <div class={bits.current() < 8 ? partialGrid : fullGrid}>
       <For each={bits.all()}>

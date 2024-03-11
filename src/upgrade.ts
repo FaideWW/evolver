@@ -71,7 +71,7 @@ export interface Upgrade {
   cost: (p?: number, c?: number) => number;
   effect: ScaleFn;
   purchased: Accessor<number>;
-  buy: (n?: number) => void;
+  buy: (n?: number, ignoreCost?: boolean) => void;
 }
 
 export function createUpgrade<T extends UnlockType>(
@@ -108,9 +108,9 @@ export function createUpgrade<T extends UnlockType>(
     purchased,
     unlocked,
     unlock: () => unlocked() === false && setUnlocked(true),
-    buy: (num: number = 1) => {
-      if (resource.current() >= costFn(purchased(), num)) {
-        resource.sub(costFn(purchased(), num));
+    buy: (num: number = 1, ignoreCost = false) => {
+      if (resource.current() >= costFn(purchased(), num) || ignoreCost) {
+        !ignoreCost && resource.sub(costFn(purchased(), num));
         setPurchased((prev) => prev + num);
       }
     },
