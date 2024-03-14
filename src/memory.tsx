@@ -4,7 +4,6 @@ import {
   Setter,
   Show,
   batch,
-  createEffect,
   createMemo,
   createSignal,
 } from "solid-js";
