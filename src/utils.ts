@@ -1,3 +1,5 @@
+import { useSettings } from "./settings";
+
 export type UnitNotationOption =
   | "Windows"
   | "IEC (decimal)"
@@ -117,6 +119,11 @@ export function applyMods(base: number, mods: ScaleFn[]) {
 export function clamp(min: number, max: number, value: number) {
   return Math.max(min, Math.min(max, value));
 }
+
+export const currency = (n: number) => {
+  const [settings] = useSettings();
+  return displayCurrency(n, settings().infoUnitNotation);
+};
 
 export const KB = 1024;
 export const MB = 1024 * 1024;

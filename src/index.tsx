@@ -1,9 +1,17 @@
 /* @refresh reload */
-import { render } from 'solid-js/web'
+import { render } from "solid-js/web";
 
-import './index.css'
-import App from './App'
+import "./index.css";
+import App from "./App";
+import { SettingsProvider } from "./settings";
 
-const root = document.getElementById('root')
+const root = document.getElementById("root");
 
-render(() => <App />, root!)
+render(
+  () => (
+    <SettingsProvider>
+      <App />
+    </SettingsProvider>
+  ),
+  root!
+);

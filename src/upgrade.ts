@@ -1,67 +1,14 @@
-import { Accessor, createEffect, createSignal } from "solid-js";
-import { ScaleFn } from "./utils";
-import { EventType, Events, bus } from "./events";
+import { Accessor, createSignal } from "solid-js";
 import { Resource } from "./resource";
-import { applyMods } from "./utils";
-
-export type UnlockType = "on-event" | "resource-threshold" | "manual";
-
-export interface UnlockFunctions {
-  "on-event": (costFn: ScaleFn, onUnlock: () => void) => void;
-  "resource-threshold": (costFn: ScaleFn, onUnlock: () => void) => void;
-  manual: () => void;
-}
-
-export interface UnlockCondition<T extends UnlockType> {
-  type: UnlockType;
-  fn: UnlockFunctions[T];
-}
-
-export function unlockOnEvent<T extends EventType>(
-  eventType: T,
-  fn: (cost: (n: number) => number) => (event: Events[T]) => boolean
-): UnlockCondition<"on-event"> {
-  return {
-    type: "on-event",
-    fn: (costFn: (m: number) => number, onUnlock: () => void) => {
-      bus.subscribe(eventType, (e, { unsubscribe }) => {
-        const result = fn(costFn)(e);
-        if (result) {
-          onUnlock();
-          unsubscribe();
-        }
-      });
-    },
-  };
-}
-
-export function manualUnlock(): UnlockCondition<"manual"> {
-  return { type: "manual", fn: () => {} };
-}
-
-export function unlockOnResourceThreshold(
-  resource: Resource,
-  threshold: number | ((cost: (n: number) => number) => number)
-): UnlockCondition<"resource-threshold"> {
-  return {
-    type: "resource-threshold",
-    fn: (costFn, onUnlock) => {
-      createEffect(() => {
-        const value =
-          typeof threshold === "function" ? threshold(costFn) : threshold;
-        console.log(`resource: ${resource.current()} - threshold ${value}`);
-        if (resource.current() >= value) {
-          onUnlock();
-        }
-      });
-    },
-  };
-}
+import { UnlockCondition, UnlockType, createUnlockable } from "./unlockable";
+import { ScaleFn, applyMods } from "./utils";
 
 export interface UpgradeConfig<T extends UnlockType> {
   costResource: Resource;
   cost: ScaleFn;
-  unlocks: UnlockCondition<T>;
+  unlocks:
+    | UnlockCondition<T>
+    | ((costFn: (n: number) => number) => UnlockCondition<T>);
   effect: ScaleFn;
 }
 
@@ -81,37 +28,24 @@ export function createUpgrade<T extends UnlockType>(
   config: UpgradeConfig<T>
 ): Upgrade {
   const { costResource: resource, cost, effect, unlocks } = config;
-  const [unlocked, setUnlocked] = createSignal(false);
   const [purchased, setPurchased] = createSignal(0);
   const effectWithPurchased: ScaleFn = (n = purchased()) => effect(n);
   effectWithPurchased.type = effect.type;
+  const unlock = createUnlockable(
+    typeof unlocks === "function" ? unlocks(cost) : unlocks
+  );
 
   const costFn = (p = purchased(), c = 1) => cost(p + (c - 1));
   return {
     cost: costFn,
     effect: effectWithPurchased,
     init: () => {
-      switch (unlocks.type) {
-        case "on-event":
-          {
-            (unlocks as UnlockCondition<"on-event">).fn(cost, () =>
-              setUnlocked(true)
-            );
-          }
-          break;
-        case "resource-threshold":
-          {
-            (unlocks as UnlockCondition<"resource-threshold">).fn(cost, () =>
-              setUnlocked(true)
-            );
-          }
-          break;
-      }
+      unlock.init();
     },
     cleanup: () => {},
     purchased,
-    unlocked,
-    unlock: () => unlocked() === false && setUnlocked(true),
+    unlocked: unlock.unlocked,
+    unlock: unlock.unlocked,
     buy: (num: number = 1, ignoreCost = false) => {
       if (resource.current() >= costFn(purchased(), num) || ignoreCost) {
         !ignoreCost && resource.sub(costFn(purchased(), num));
