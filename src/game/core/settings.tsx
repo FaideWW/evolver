@@ -5,7 +5,12 @@ import {
   createSignal,
   useContext,
 } from "solid-js";
-import { UnitNotationOption } from "./utils";
+
+export type UnitNotationOption =
+  | "Windows"
+  | "IEC (decimal)"
+  | "IEC (binary)"
+  | "Scientific";
 
 interface Settings {
   infoUnitNotation: UnitNotationOption;

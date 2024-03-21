@@ -1,8 +1,11 @@
 import { createSignal, Accessor, batch } from "solid-js";
 import { createStore, produce } from "solid-js/store";
-import { Upgrade, UpgradeFn, applyUpgrades } from "./upgrade";
+import { Upgrade, UpgradeFn, applyUpgrades } from "@core/upgrade";
+import { clamp } from "./utils";
+import { bus } from "./events";
 
 export interface Resource {
+  name: string;
   current: Accessor<number>;
   baseMax: Accessor<number>;
   max: UpgradeFn;
@@ -29,6 +32,7 @@ export interface StatefulResourceConfig<T> extends ResourceConfig {
 }
 
 export function createResource(
+  name: string,
   initialValue: number,
   maxValue: number = Infinity,
   cfg: ResourceConfig = {}
@@ -40,15 +44,33 @@ export function createResource(
   const [upgrades, setUpgrades] = createSignal<Upgrade[]>([]);
   const moddedMax: UpgradeFn = (n) => applyUpgrades(baseMax(), upgrades())(n);
 
+  const changeCurrent = (n: number) => {
+    const newValue = clamp(
+      cfg.unfloored ? -Infinity : 0,
+      cfg.uncapped ? Infinity : moddedMax(),
+      n
+    );
+    if (newValue !== current()) {
+      const prevValue = current();
+      setCurrent(newValue);
+      bus.emit("resource-change", {
+        resourceName: name,
+        delta: newValue - prevValue,
+        newCurrent: newValue,
+      });
+    }
+    return newValue;
+  };
+
   return {
+    name,
     current,
     baseMax: baseMax,
     max: moddedMax,
 
-    add: (n) =>
-      setCurrent((c) => (cfg.uncapped ? c + n : Math.min(moddedMax(), c + n))),
-    sub: (n) => setCurrent((c) => (cfg.unfloored ? c - n : Math.max(0, c - n))),
-    set: setCurrent,
+    add: (n) => changeCurrent(current() + n),
+    sub: (n) => changeCurrent(current() - n),
+    set: changeCurrent,
     setMax: setBaseMax,
     // TODO: do we actually want to apply upgrades like this?
     applyUpgrade: (upgrade) =>
@@ -61,12 +83,13 @@ export function createResource(
 }
 
 export function createStatefulResource<T>(
+  name: string,
   initialValue: number,
   maxValue: number = Infinity,
   cfg: StatefulResourceConfig<T>
 ): StatefulResource<T> {
   const { create } = cfg;
-  const baseResource = createResource(initialValue, maxValue, cfg);
+  const baseResource = createResource(name, initialValue, maxValue, cfg);
 
   const initialState: T[] = [];
   for (let i = 0; i < baseResource.current(); i++) {

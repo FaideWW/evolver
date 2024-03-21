@@ -1,6 +1,6 @@
 import { Accessor, createSignal } from "solid-js";
-import { Resource } from "./resource";
-import { ScaleFn } from "./utils";
+import { Resource } from "@core/resource";
+import { ScaleFn } from "@core/utils";
 
 export interface Buyable {
   resource: Resource;

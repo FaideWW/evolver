@@ -1,10 +1,4 @@
-import { useSettings } from "./settings";
-
-export type UnitNotationOption =
-  | "Windows"
-  | "IEC (decimal)"
-  | "IEC (binary)"
-  | "Scientific";
+import { useSettings, UnitNotationOption } from "@core/settings";
 
 export const cssInterpolate = (color1: string, color2: string, t: number) => {
   // Convert the hex colors to RGB values
@@ -67,9 +61,8 @@ export const displayCurrency = (b: number, notation: UnitNotationOption) => {
     orders++;
   }
 
-  return `${scaledB.toLocaleString(undefined, { maximumFractionDigits: 2 })}${
-    unitPrefixes[notation][orders]
-  }b`;
+  return `${scaledB.toLocaleString(undefined, { maximumFractionDigits: 2 })}${unitPrefixes[notation][orders]
+    }b`;
 };
 
 export type Modifier = (n: number) => ModValue;
@@ -78,11 +71,17 @@ export type ModValue = {
   type: ModType;
 };
 
-export type ModType = "additive" | "multiplicative";
+export type ModType = "flat" | "additive" | "multiplicative";
 export type ScaleFn = {
   type: ModType;
   (n?: number): number;
 };
+
+export function flat(base: number = 0): ScaleFn {
+  const fn = () => base;
+  fn.type = "flat" as const;
+  return fn;
+}
 
 export function additive(added: number, base: number = 0): ScaleFn {
   const fn = (n: number = 0) => base + added * n;

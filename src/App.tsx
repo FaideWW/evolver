@@ -1,41 +1,39 @@
-import { For, Index, Show, createSignal, onCleanup, onMount } from "solid-js";
-import colors from "tailwindcss/colors";
-import { Button } from "./Button";
+import { Button } from "@components/Button";
+import { cssInterpolate, currency, displayTime } from "@core/utils";
+import { clickBit, flipBitMux } from "@resources/bits/actions";
+import { bitCost, bits } from "@resources/bits/base";
 import {
-  bitCost,
-  bitFlipAddedInfoUpgrade,
   bitFlipCooldown,
   bitFlipCooldownProgress,
-  bitFlipCooldownUpgrade,
   bitFlippable,
   bitInfoPerFlip,
-  bitMuxAvailable,
-  bitMuxCooldownProgress,
-  bitParallelFlipUpgrade,
   bitParallelFlips,
-  bits,
   bitsFlipped,
-  bitsFlippedUpgrade,
-  buyBit,
-  clickBit,
-  flipBitMux,
-} from "./bit";
-import { data, maxDataUpgrade } from "./data";
+} from "@resources/bits/calcs";
+import { bitMuxAvailable, bitMuxCooldownProgress } from "@resources/bits/mux";
 import {
-  ProcessShop,
-  ProcessSwitchBoard,
-  cleanupProcesses,
-  initProcesses,
-  maxMemoryUpgrade,
-  memory,
-  processShopUnlock,
-  processesByStatus,
-  tickProcesses,
-} from "./memory";
-import { cssInterpolate, currency, displayTime } from "./utils";
+  bitFlipAddedInfoUpgrade,
+  bitFlipCooldownUpgrade,
+  bitParallelFlipUpgrade,
+  bitsFlippedUpgrade,
+} from "@resources/bits/upgrades";
+import { data } from "@resources/data/base";
+import { maxDataUpgrade } from "@resources/data/upgrades";
+import { MemoryStack } from "@resources/memory/MemoryStack";
+import { RoutinesShop } from "@resources/memory/RoutinesShop";
+import { RoutineSwitchBoard } from "@resources/memory/RoutinesSwitchboard";
+import {
+  cleanupRoutines,
+  initRoutines,
+  routinesUnlock,
+  tickRoutines,
+} from "@resources/memory/routines";
+import { maxMemoryUpgrade } from "@resources/memory/upgrades";
+import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
+import colors from "tailwindcss/colors";
 
 function initialize() {
-  initProcesses();
+  initRoutines();
 
   maxDataUpgrade.init();
   maxMemoryUpgrade.init();
@@ -43,7 +41,7 @@ function initialize() {
   bitFlipCooldownUpgrade.init();
   bitsFlippedUpgrade.init();
   bitFlipAddedInfoUpgrade.init();
-  processShopUnlock.init();
+  routinesUnlock.init();
 }
 
 function cleanup() {
@@ -54,11 +52,11 @@ function cleanup() {
   // bitsFlippedUpgrade.cleanup();
   // bitFlipAddedInfoUpgrade.cleanup();
 
-  cleanupProcesses();
+  cleanupRoutines();
 }
 
 function tick(next: Date, delta: number) {
-  tickProcesses(next, delta);
+  tickRoutines(next, delta);
 }
 
 function App() {
@@ -98,9 +96,9 @@ function App() {
           </Button>
           <div class="grow flex flex-col justify-center">
             <BitGrid now={now()} />
-            <Show when={memory.max() > 0}>
+            <Show when={routinesUnlock.unlocked()}>
               <MemoryStack />
-              <ProcessSwitchBoard />
+              <RoutineSwitchBoard />
             </Show>
           </div>
           <div id="game-state">
@@ -114,7 +112,7 @@ function App() {
           <Purchases />
         </div>
         <div id="processes" class="">
-          <ProcessShop />
+          <RoutinesShop />
         </div>
         <div id="upgrades" class="">
           <Upgrades />
@@ -179,43 +177,15 @@ function BitGrid(props: { now: Date }) {
   );
 }
 
-function MemoryStack() {
-  const memorySlots = () => new Array(memory.max() + 1);
-  return (
-    <div>
-      <h3 class="text-xl">Memory</h3>
-      <div class="flex flex-row items-center gap-2">
-        <div
-          class="w-40 bg-gray-700 flex flex-col-reverse"
-          style={{ height: `${40 * memory.max()}px` }}
-        >
-          <For each={processesByStatus("running")}>
-            {(proc) => (
-              <div
-                class="bg-slate-400"
-                style={{ height: `${40 * proc.proc.memoryCost}px` }}
-              >
-                <div class="text-xs">{proc.proc.name}</div>
-              </div>
-            )}
-          </For>
-        </div>
-        <div class="flex flex-col-reverse">
-          <Index each={memorySlots()}>
-            {(_, index) => <div class="h-10 leading-10">{index}</div>}
-          </Index>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function Purchases() {
   return (
     <>
-      <Show when={data.current() >= bitCost() || bits.current() > 1}>
-        <Button onClick={() => buyBit()} disabled={data.current() < bitCost()}>
-          new bit ({currency(bitCost())})
+      <Show when={data.current() >= bitCost.cost() || bits.current() > 1}>
+        <Button
+          onClick={() => bitCost.buy()}
+          disabled={data.current() < bitCost.cost()}
+        >
+          new bit ({currency(bitCost.cost())})
         </Button>
       </Show>
       <Show when={maxMemoryUpgrade.unlocked()}>
@@ -234,6 +204,7 @@ function Upgrades() {
   return (
     <>
       <Show when={bitParallelFlipUpgrade.unlocked()}>
+        <h3 class="text-xl my-8">Upgrades</h3>
         <Button
           onClick={() => bitParallelFlipUpgrade.buy()}
           disabled={data.current() < bitParallelFlipUpgrade.cost()}

@@ -1,7 +1,12 @@
 import { Accessor, createSignal } from "solid-js";
-import { Resource } from "./resource";
-import { UnlockCondition, UnlockType, createUnlockable } from "./unlockable";
-import { ScaleFn, applyMods } from "./utils";
+import { Resource } from "@core/resource";
+import {
+  UnlockCondition,
+  UnlockType,
+  createUnlockable,
+} from "@core/unlockable";
+import { ScaleFn, applyMods } from "@core/utils";
+import { bus } from "./events";
 
 export interface UpgradeConfig<T extends UnlockType> {
   costResource: Resource;
@@ -13,6 +18,7 @@ export interface UpgradeConfig<T extends UnlockType> {
 }
 
 export interface Upgrade {
+  name: string;
   init: () => void;
   // TODO: implement this (move cleanup related stuff to here)
   cleanup: () => void;
@@ -25,6 +31,7 @@ export interface Upgrade {
 }
 
 export function createUpgrade<T extends UnlockType>(
+  name: string,
   config: UpgradeConfig<T>
 ): Upgrade {
   const { costResource: resource, cost, effect, unlocks } = config;
@@ -32,11 +39,24 @@ export function createUpgrade<T extends UnlockType>(
   const effectWithPurchased: ScaleFn = (n = purchased()) => effect(n);
   effectWithPurchased.type = effect.type;
   const unlock = createUnlockable(
+    name,
     typeof unlocks === "function" ? unlocks(cost) : unlocks
   );
 
+  const changePurchased = (nextValue: number | ((prev: number) => number)) => {
+    const prevValue = purchased();
+    setPurchased(nextValue);
+    const newValue = purchased();
+    bus.emit("upgrade-change", {
+      upgradeName: name,
+      prevPurchased: prevValue,
+      newPurchased: newValue,
+    });
+  };
+
   const costFn = (p = purchased(), c = 1) => cost(p + (c - 1));
   return {
+    name,
     cost: costFn,
     effect: effectWithPurchased,
     init: () => {
@@ -49,7 +69,7 @@ export function createUpgrade<T extends UnlockType>(
     buy: (num: number = 1, ignoreCost = false) => {
       if (resource.current() >= costFn(purchased(), num) || ignoreCost) {
         !ignoreCost && resource.sub(costFn(purchased(), num));
-        setPurchased((prev) => prev + num);
+        changePurchased((prev) => prev + num);
       }
     },
   };

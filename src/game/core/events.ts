@@ -1,4 +1,5 @@
 import { onCleanup } from "solid-js";
+import { RoutineStatus } from "./routines";
 
 export interface FlipBitEvent {
   infoDelta: number;
@@ -9,10 +10,36 @@ export interface BuyBitEvent {
   newBitCount: number;
 }
 
+export interface ResourceChangeEvent {
+  resourceName: string;
+  delta: number;
+  newCurrent: number;
+}
+
+export interface UpgradeChangeEvent {
+  upgradeName: string;
+  newPurchased: number;
+  prevPurchased: number;
+}
+
+export interface RoutineStatusChangeEvent {
+  routineName: string;
+  prevStatus: RoutineStatus;
+  newStatus: RoutineStatus;
+}
+
+export interface UnlockEvent {
+  unlockName: string;
+}
+
 export interface Events {
   "flip-bit": FlipBitEvent;
   "buy-bit": BuyBitEvent;
   "buy-autoflipper": Record<string, never>;
+  "resource-change": ResourceChangeEvent;
+  "upgrade-change": UpgradeChangeEvent;
+  "routine-status-change": RoutineStatusChangeEvent;
+  unlock: UnlockEvent;
 }
 
 export type EventType = keyof Events;

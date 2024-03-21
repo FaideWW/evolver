@@ -1,6 +1,6 @@
 import { Accessor, createEffect, createSignal } from "solid-js";
-import { EventType, Events, bus } from "./events";
-import { Resource } from "./resource";
+import { EventType, Events, bus } from "@core/events";
+import { Resource } from "@core/resource";
 
 export type UnlockType =
   | "on-event"
@@ -79,40 +79,47 @@ export function unlockOnSignalCondition<T>(
 }
 
 export interface Unlockable {
+  name: string;
   init: () => void;
   unlock: () => void;
   unlocked: Accessor<boolean>;
 }
 
 export function createUnlockable<T extends UnlockType>(
+  name: string,
   cfg: UnlockCondition<T>
 ) {
   const [unlocked, setUnlocked] = createSignal(false);
+  const changeUnlocked = (nextValue: boolean) => {
+    setUnlocked(nextValue);
+    bus.emit("unlock", { unlockName: name });
+  };
   return {
+    name,
     init: () => {
       switch (cfg.type) {
         case "on-event":
           {
-            (cfg as UnlockCondition<"on-event">).fn(() => setUnlocked(true));
+            (cfg as UnlockCondition<"on-event">).fn(() => changeUnlocked(true));
           }
           break;
         case "resource-threshold":
           {
             (cfg as UnlockCondition<"resource-threshold">).fn(() =>
-              setUnlocked(true)
+              changeUnlocked(true)
             );
           }
           break;
         case "on-signal-condition":
           {
             (cfg as UnlockCondition<"on-signal-condition">).fn(() =>
-              setUnlocked(true)
+              changeUnlocked(true)
             );
           }
           break;
       }
     },
     unlocked,
-    unlock: () => setUnlocked(true),
+    unlock: () => changeUnlocked(true),
   };
 }

@@ -3,7 +3,7 @@ import { render } from "solid-js/web";
 
 import "./index.css";
 import App from "./App";
-import { SettingsProvider } from "./settings";
+import { SettingsProvider } from "@core/settings";
 
 const root = document.getElementById("root");
 
